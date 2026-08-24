@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.entro314labs.Circle</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Circle</name>
+  <summary>Find and edit the people in your address book</summary>
+  <developer id="io.github.entro314labs">
+    <name>entro314 labs</name>
+  </developer>
+  <description>
+    <p>
+      Circle is the contacts application for the COSMIC desktop. Contacts are
+      plain vCard files in a vdir layout, so they stay readable by khard,
+      vdirsyncer, and anything else that speaks .vcf.
+    </p>
+    <p>
+      Editing a contact patches the stored card rather than rebuilding it, so
+      photos, custom labels, and every property Circle does not itself display
+      survive an edit and a sync.
+    </p>
+    <p>
+      Accounts are shared with the rest of the suite: an account added in Slate
+      is already here, with one password in the system keyring rather than one
+      per application.
+    </p>
+  </description>
+  <icon type="remote" width="64" height="64" scale="1">
+    https://github.com/entro314-labs/circle/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
+  </icon>
+  <url type="homepage">https://github.com/entro314-labs/circle</url>
+  <url type="bugtracker">https://github.com/entro314-labs/circle/issues</url>
+  <url type="vcs-browser">https://github.com/entro314-labs/circle</url>
+  <launchable type="desktop-id">io.github.entro314labs.Circle.desktop</launchable>
+  <provides>
+    <binary>circle</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>Office</category>
+    <category>ContactManagement</category>
+  </categories>
+  <keywords>
+    <keyword>contacts</keyword>
+    <keyword>address book</keyword>
+    <keyword>vCard</keyword>
+  </keywords>
+  <content_rating type="oars-1.1" />
+  <branding>
+    <color type="primary" scheme_preference="light">#842bd2</color>
+    <color type="primary" scheme_preference="dark">#3a1063</color>
+  </branding>
+  <releases>
+    <release version="0.1.0" date="2026-08-24">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

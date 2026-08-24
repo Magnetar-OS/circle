@@ -1,0 +1,80 @@
+[package]
+name = "circle"
+version = "0.1.0"
+edition = "2024"
+# GPL-3.0-only for the application; the shared substrate (cosmic-pim) is
+# MPL-2.0 and is linked, not absorbed. See LICENSING.md.
+license = "GPL-3.0-only"
+description = "Circle — contacts for the COSMIC desktop"
+repository = "https://github.com/entro314-labs/circle"
+rust-version = "1.98.0"
+
+[build-dependencies]
+# Generates the desktop entry and AppStream metainfo from `resources/*` plus the
+# Fluent catalogues, so the app's name and summary are translated in the
+# applications menu and the software centre too. See build.rs.
+xdgen = "0.1"
+
+[dependencies]
+# --- the shared PIM substrate (MPL-2.0) ---
+# Paths until cosmic-pim is pushed; then git tags, with a commented [patch]
+# below for local work. See slate/Cargo.toml for the same note in full.
+cosmic-pim-core = { path = "../cosmic-pim/crates/cosmic-pim-core" }
+cosmic-pim-accounts = { path = "../cosmic-pim/crates/cosmic-pim-accounts" }
+cosmic-pim-sync = { path = "../cosmic-pim/crates/cosmic-pim-sync" }
+
+# --- COSMIC / UI ---
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8.12"
+open = "5.4"
+tokio = { version = "1.53", features = ["full"] }
+
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0.229", features = ["derive"] }
+# The single-instance hand-over serialises its request as JSON (Slate does the
+# same), and the pop-launcher plugin speaks newline-delimited JSON on stdio.
+serde_json = "1"
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+features = [
+    # About widget for the app
+    "about",
+    # On app startup, focuses an existing instance if the app is already open;
+    # also what carries `circle --new-contact` and `.vcf` paths to it.
+    "single-instance",
+    # GPU-accelerated rendering
+    "wgpu",
+    # Native file dialogs, for .vcf import and export
+    "xdg-portal",
+    # `spawn_desktop_exec` with a systemd transient scope, so a window the
+    # launcher plugin opens belongs to the session rather than to pop-launcher.
+    "desktop-systemd-scope",
+]
+
+[dev-dependencies]
+# Integration tests write real address books to a scratch directory rather than
+# mocking the store: the thing under test is that bytes survive a round trip
+# through the filesystem, which a mock cannot demonstrate.
+tempfile = "3"
+
+[[bin]]
+name = "circle"
+path = "src/main.rs"
+
+[[bin]]
+# pop-launcher plugin: searching contacts from the COSMIC launcher.
+name = "circle-launcher"
+path = "src/bin/launcher.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

@@ -1,0 +1,25 @@
+[Desktop Entry]
+Name=Circle
+GenericName=Contacts
+Comment=Find and edit the people in your address book
+Categories=COSMIC;Office;ContactManagement;
+Exec=circle %U
+Icon=io.github.entro314labs.Circle
+Terminal=false
+Type=Application
+StartupNotify=true
+StartupWMClass=io.github.entro314labs.Circle
+MimeType=text/vcard;text/x-vcard;text/directory;
+Keywords=contact;contacts;address;addressbook;vcard;person;people;phone;email;
+# Deliberately NOT DBusActivatable, for the reason spelled out in full in
+# Slate's desktop entry: libcosmic's run_single_instance claims the bus name but
+# serves org.freedesktop.DbusActivation rather than the org.freedesktop.Application
+# the freedesktop spec requires, so GIO's call fails silently and opening a .vcf
+# from a file manager would do nothing at all. The Exec line reaches the same
+# place — a second `circle` hands its command line to the running instance over
+# that same libcosmic interface and exits.
+Actions=new-contact;
+
+[Desktop Action new-contact]
+Name=New Contact
+Exec=circle --new-contact

@@ -1,0 +1,16 @@
+(
+    name: "Circle",
+    description: "Search your contacts",
+    bin: (
+        path: "circle-launcher",
+    ),
+    icon: Some(Name("avatar-default-symbolic")),
+    query: (
+        // Only run when the query starts with "con ", so the plugin does not
+        // search every keystroke typed into the launcher.
+        help: Some("con "),
+        isolate: false,
+        persistent: false,
+        priority: Default,
+    ),
+)

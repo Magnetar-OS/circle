@@ -1,0 +1,1280 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! The Circle application shell.
+
+use cosmic::app::{Core, Task, context_drawer};
+use cosmic::cosmic_config::CosmicConfigEntry as _;
+use cosmic::iced::keyboard::{Key, Modifiers};
+use cosmic::iced::{Length, Subscription};
+use cosmic::prelude::*;
+use cosmic::widget::menu::action::MenuAction as _;
+use cosmic::widget::{self, about::About, menu, nav_bar};
+use cosmic_pim_core::model::{CalendarMeta, Contact};
+use cosmic_pim_core::store::contacts::ContactStore;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use crate::config::Config;
+use crate::fl;
+use crate::ui::editor;
+
+const APP_ID: &str = "io.github.entro314labs.Circle";
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
+
+/// Identifies one contact.
+///
+/// The UID alone will not do. A UID is unique within a collection, not across
+/// them, and the same person synced from two accounts legitimately carries the
+/// same UID in both books — which is the normal case Circle's linking model
+/// (03, tier 5) is eventually built on, not an error. Keying the selection on
+/// the UID alone would make those two rows the same row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContactKey {
+    pub book: String,
+    pub uid: String,
+}
+
+impl ContactKey {
+    #[must_use]
+    pub fn of(contact: &Contact) -> Self {
+        Self {
+            book: contact.addressbook_id.clone(),
+            uid: contact.uid.clone(),
+        }
+    }
+
+    #[must_use]
+    pub fn matches(&self, contact: &Contact) -> bool {
+        self.book == contact.addressbook_id && self.uid == contact.uid
+    }
+}
+
+/// What a nav-bar entry filters the list to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum NavEntry {
+    All,
+    Book(String),
+}
+
+/// Start-up options, from the command line or a D-Bus activation.
+///
+/// Build one with [`Flags::new`]: the hand-over request a second launch sends
+/// over the bus is derived from the fields once, at construction, because
+/// [`cosmic::app::CosmicFlags::action`] can only return a reference to
+/// something the struct already owns. Mirrors Slate's `Flags` — the suite's
+/// apps should be launched the same way.
+#[derive(Clone, Debug, Default)]
+pub struct Flags {
+    /// `.vcf` files to import on start-up.
+    pub import: Vec<PathBuf>,
+    /// Open the editor on a blank contact once the window is up.
+    pub new_contact: bool,
+    /// Start with the list filtered to this query — how the launcher plugin
+    /// opens a specific person.
+    pub search: Option<String>,
+    /// What to ask an already-running instance to do, or `None` when there is
+    /// nothing to say and raising its window is the whole request.
+    task: Option<CircleTask>,
+}
+
+impl Flags {
+    #[must_use]
+    pub fn new(import: Vec<PathBuf>, new_contact: bool, search: Option<String>) -> Self {
+        let task = (new_contact || search.is_some() || !import.is_empty()).then_some(CircleTask {
+            new_contact,
+            search: search.clone(),
+        });
+        Self {
+            import,
+            new_contact,
+            search,
+            task,
+        }
+    }
+}
+
+/// What a second launch asks the running instance to do. Serialised as JSON
+/// across the bus — see Slate's `SlateTask` for why a struct rather than a
+/// bespoke encoding. The `.vcf` paths travel in `CosmicFlags::args`, the only
+/// part of the request that is a list.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CircleTask {
+    pub new_contact: bool,
+    #[serde(default)]
+    pub search: Option<String>,
+}
+
+impl std::fmt::Display for CircleTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned()))
+    }
+}
+
+impl std::str::FromStr for CircleTask {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_str(s)
+    }
+}
+
+impl cosmic::app::CosmicFlags for Flags {
+    type SubCommand = CircleTask;
+    type Args = Vec<String>;
+
+    fn action(&self) -> Option<&Self::SubCommand> {
+        self.task.as_ref()
+    }
+
+    fn args(&self) -> Vec<&str> {
+        self.import
+            .iter()
+            .filter_map(|path| path.to_str())
+            .collect()
+    }
+}
+
+pub struct AppModel {
+    core: Core,
+    about: About,
+    context_page: ContextPage,
+    key_binds: HashMap<menu::KeyBind, MenuAction>,
+
+    config: Config,
+    /// The handle writes go through. `None` when cosmic-config is unavailable,
+    /// in which case settings still work for the session but do not persist —
+    /// a degraded app is better than one that will not start.
+    config_handler: Option<cosmic::cosmic_config::Config>,
+
+    store: Option<ContactStore>,
+    nav: nav_bar::Model,
+    /// Writable books, cached as parallel id/name vectors.
+    ///
+    /// `widget::dropdown` borrows its labels for the lifetime of the view, so
+    /// they cannot be built inside `settings_view`; caching them here also
+    /// keeps the list off the per-frame path. Rebuilt by `rebuild_nav`.
+    writable_ids: Vec<String>,
+    writable_names: Vec<String>,
+
+    /// Everything matching the current query and book filter, sorted.
+    contacts: Vec<Contact>,
+    selected: Option<ContactKey>,
+    /// The selected contact's decoded photo, if it has one.
+    ///
+    /// Cached because `view` runs every frame and a PHOTO is hundreds of
+    /// kilobytes of base64 — decoding it per redraw would burn a visible
+    /// amount of CPU on an idle window. Refreshed whenever the selection
+    /// changes or the list reloads; only ever one entry, because only the
+    /// detail pane shows an image at all.
+    photo: Option<widget::image::Handle>,
+    query: String,
+
+    /// `Some` while a contact is being edited or created.
+    editor: Option<editor::State>,
+    /// `Some` while a confirmation dialog is up.
+    dialog: Option<Dialog>,
+
+    toasts: widget::Toasts<Message>,
+    /// Set when the store could not be opened at all.
+    fatal: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Dialog {
+    ConfirmDelete { key: ContactKey, name: String },
+}
+
+#[derive(Clone, Debug)]
+pub enum Message {
+    LaunchUrl(String),
+    ToggleContextPage(ContextPage),
+    UpdateConfig(Config),
+
+    QueryChanged(String),
+    Select(ContactKey),
+    Copy(String),
+    FilesChanged,
+    Refresh,
+    Key(Modifiers, Key, cosmic::iced::keyboard::key::Physical),
+    FocusSearch,
+    CloseToast(widget::ToastId),
+
+    ToggleBook(String),
+    SortByGivenName(bool),
+    DefaultBook(usize),
+
+    NewContact,
+    EditContact,
+    Editor(editor::Message),
+    EditorSave,
+    EditorCancel,
+
+    ImportRequested,
+    ImportPath(PathBuf),
+    ExportRequested,
+    ExportTo(PathBuf, Vec<String>),
+    DialogCancelled,
+    DialogFailed(String),
+
+    DeleteRequested,
+    DeleteConfirmed,
+    DialogCancel,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ContextPage {
+    #[default]
+    About,
+    Settings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MenuAction {
+    NewContact,
+    EditContact,
+    Delete,
+    Search,
+    Import,
+    Export,
+    Refresh,
+    Settings,
+    About,
+}
+
+impl menu::action::MenuAction for MenuAction {
+    type Message = Message;
+
+    fn message(&self) -> Self::Message {
+        match self {
+            MenuAction::NewContact => Message::NewContact,
+            MenuAction::EditContact => Message::EditContact,
+            MenuAction::Delete => Message::DeleteRequested,
+            MenuAction::Search => Message::FocusSearch,
+            MenuAction::Import => Message::ImportRequested,
+            MenuAction::Export => Message::ExportRequested,
+            MenuAction::Refresh => Message::Refresh,
+            MenuAction::Settings => Message::ToggleContextPage(ContextPage::Settings),
+            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+        }
+    }
+}
+
+/// The search field's id, so `Ctrl+F` has something to focus.
+fn search_id() -> widget::Id {
+    widget::Id::new("search")
+}
+
+impl cosmic::Application for AppModel {
+    type Executor = cosmic::executor::Default;
+    type Flags = Flags;
+    type Message = Message;
+    const APP_ID: &'static str = APP_ID;
+
+    fn core(&self) -> &Core {
+        &self.core
+    }
+
+    fn core_mut(&mut self) -> &mut Core {
+        &mut self.core
+    }
+
+    fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        let about = About::default()
+            .name(fl!("app-title"))
+            .icon(widget::icon::from_svg_bytes(APP_ICON))
+            .version(env!("CARGO_PKG_VERSION"))
+            .license(env!("CARGO_PKG_LICENSE"))
+            .links([(fl!("repository"), REPOSITORY)]);
+
+        let config_handler = cosmic::cosmic_config::Config::new(APP_ID, Config::VERSION).ok();
+        let config = config_handler
+            .as_ref()
+            .map(|handler| match Config::get_entry(handler) {
+                Ok(config) => config,
+                Err((errors, config)) => {
+                    for why in errors {
+                        tracing::warn!(%why, "error loading the configuration");
+                    }
+                    config
+                }
+            })
+            .unwrap_or_default();
+
+        let (store, fatal) = match ContactStore::open_default() {
+            Ok(store) => (Some(store), None),
+            Err(why) => {
+                tracing::error!(%why, "cannot open the contact store");
+                (None, Some(why.to_string()))
+            }
+        };
+
+        let mut model = Self {
+            core,
+            about,
+            context_page: ContextPage::default(),
+            key_binds: crate::key_bind::key_binds(),
+            config,
+            config_handler,
+            store,
+            nav: nav_bar::Model::default(),
+            writable_ids: Vec::new(),
+            writable_names: Vec::new(),
+            contacts: Vec::new(),
+            selected: None,
+            photo: None,
+            query: String::new(),
+            editor: None,
+            dialog: None,
+            toasts: widget::Toasts::new(Message::CloseToast),
+            fatal: None,
+        };
+        model.fatal = fatal;
+        model.rebuild_nav();
+        model.reload();
+
+        // Start-up requests from the command line: `.vcf` paths to import, and
+        // the desktop entry's "New Contact" action.
+        let mut tasks = vec![model.update_title()];
+        for path in flags.import {
+            tasks.push(cosmic::task::message(cosmic::Action::App(
+                Message::ImportPath(path),
+            )));
+        }
+        if let Some(query) = flags.search {
+            tasks.push(cosmic::task::message(cosmic::Action::App(
+                Message::QueryChanged(query),
+            )));
+        }
+        if flags.new_contact {
+            tasks.push(cosmic::task::message(cosmic::Action::App(
+                Message::NewContact,
+            )));
+        }
+        (model, Task::batch(tasks))
+    }
+
+    /// A second launch handing over its command line, or a launcher invoking
+    /// one of the desktop entry's `Actions=`. Without this the desktop entry
+    /// and the `MimeType=` registration are promises with nothing behind them.
+    fn dbus_activation(&mut self, msg: cosmic::dbus_activation::Message) -> Task<Self::Message> {
+        use cosmic::dbus_activation::Details;
+
+        match msg.msg {
+            // Plain launch: just raise the window, which the runtime has
+            // already done.
+            Details::Activate => Task::none(),
+
+            Details::Open { url } => {
+                let paths: Vec<PathBuf> = url
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .collect();
+                if paths.is_empty() {
+                    tracing::warn!(?url, "activation carried no local files");
+                    return Task::none();
+                }
+                Task::batch(paths.into_iter().map(|path| {
+                    cosmic::task::message(cosmic::Action::App(Message::ImportPath(path)))
+                }))
+            }
+
+            // A launcher sends the bare action name from `Actions=`; a second
+            // `circle` process sends a serialised `CircleTask` with the `.vcf`
+            // paths in `args`.
+            Details::ActivateAction { action, args } => match action.as_str() {
+                "new-contact" => cosmic::task::message(cosmic::Action::App(Message::NewContact)),
+                encoded => {
+                    let Ok(task) = encoded.parse::<CircleTask>() else {
+                        tracing::warn!(action = encoded, ?args, "unknown activation action");
+                        return Task::none();
+                    };
+                    let mut tasks: Vec<Task<Self::Message>> = args
+                        .iter()
+                        .map(|arg| {
+                            cosmic::task::message(cosmic::Action::App(Message::ImportPath(
+                                PathBuf::from(arg),
+                            )))
+                        })
+                        .collect();
+                    if let Some(query) = task.search {
+                        tasks.push(cosmic::task::message(cosmic::Action::App(
+                            Message::QueryChanged(query),
+                        )));
+                    }
+                    if task.new_contact {
+                        tasks.push(cosmic::task::message(cosmic::Action::App(
+                            Message::NewContact,
+                        )));
+                    }
+                    Task::batch(tasks)
+                }
+            },
+        }
+    }
+
+    /// libcosmic's own keyboard navigation owns Ctrl+F and calls this — the
+    /// hook exists so applications do not each listen for the chord themselves.
+    fn on_search(&mut self) -> Task<Self::Message> {
+        widget::text_input::focus(search_id())
+    }
+
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
+        let can_edit = self.selected.is_some() && self.editor.is_none();
+
+        let file = menu::Tree::with_children(
+            menu::root(fl!("file")).apply(Element::from),
+            menu::items(
+                &self.key_binds,
+                vec![
+                    menu::Item::Button(fl!("new-contact"), None, MenuAction::NewContact),
+                    menu::Item::Divider,
+                    menu::Item::Button(fl!("import"), None, MenuAction::Import),
+                    menu::Item::Button(fl!("export"), None, MenuAction::Export),
+                    menu::Item::Divider,
+                    menu::Item::Button(fl!("refresh"), None, MenuAction::Refresh),
+                ],
+            ),
+        );
+
+        let edit = menu::Tree::with_children(
+            menu::root(fl!("edit")).apply(Element::from),
+            menu::items(
+                &self.key_binds,
+                vec![
+                    if can_edit {
+                        menu::Item::Button(fl!("edit-contact"), None, MenuAction::EditContact)
+                    } else {
+                        menu::Item::ButtonDisabled(
+                            fl!("edit-contact"),
+                            None,
+                            MenuAction::EditContact,
+                        )
+                    },
+                    if can_edit {
+                        menu::Item::Button(fl!("delete-contact"), None, MenuAction::Delete)
+                    } else {
+                        menu::Item::ButtonDisabled(fl!("delete-contact"), None, MenuAction::Delete)
+                    },
+                    menu::Item::Divider,
+                    menu::Item::Button(fl!("search-contacts"), None, MenuAction::Search),
+                ],
+            ),
+        );
+
+        let view = menu::Tree::with_children(
+            menu::root(fl!("view")).apply(Element::from),
+            menu::items(
+                &self.key_binds,
+                vec![
+                    menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
+                    menu::Item::Button(fl!("about"), None, MenuAction::About),
+                ],
+            ),
+        );
+
+        vec![menu::bar(vec![file, edit, view]).into()]
+    }
+
+    fn nav_model(&self) -> Option<&nav_bar::Model> {
+        // Hidden while editing: switching books mid-edit would either discard
+        // the edit or leave the editor pointing at a contact the list no longer
+        // shows, and neither is worth the plumbing.
+        (self.editor.is_none() && self.fatal.is_none()).then_some(&self.nav)
+    }
+
+    fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
+        self.nav.activate(id);
+        self.reload();
+        self.update_title()
+    }
+
+    fn on_escape(&mut self) -> Task<Self::Message> {
+        if self.dialog.is_some() {
+            self.dialog = None;
+        } else if self.editor.is_some() {
+            self.editor = None;
+        } else if !self.query.is_empty() {
+            self.query.clear();
+            self.reload();
+        }
+        Task::none()
+    }
+
+    fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        let Dialog::ConfirmDelete { name, .. } = self.dialog.as_ref()?;
+        Some(
+            widget::dialog()
+                .title(fl!("confirm-delete-title", name = name.clone()))
+                .body(fl!("confirm-delete-body"))
+                .primary_action(
+                    widget::button::destructive(fl!("delete")).on_press(Message::DeleteConfirmed),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                )
+                .into(),
+        )
+    }
+
+    fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
+        if !self.core.window.show_context {
+            return None;
+        }
+        Some(match self.context_page {
+            ContextPage::About => context_drawer::about(
+                &self.about,
+                |url| Message::LaunchUrl(url.to_string()),
+                Message::ToggleContextPage(ContextPage::About),
+            ),
+            ContextPage::Settings => context_drawer::context_drawer(
+                self.settings_view(),
+                Message::ToggleContextPage(ContextPage::Settings),
+            )
+            .title(fl!("settings")),
+        })
+    }
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        let spacing = cosmic::theme::spacing();
+
+        if let Some(fatal) = &self.fatal {
+            return widget::text::body(format!("{}\n\n{fatal}", fl!("error-load-contacts")))
+                .apply(widget::container)
+                .padding(spacing.space_m)
+                .into();
+        }
+
+        let list = widget::column::with_capacity(2)
+            .spacing(spacing.space_xs)
+            .padding(spacing.space_xs)
+            .push(
+                widget::search_input(fl!("search-contacts"), &self.query)
+                    .id(search_id())
+                    .on_input(Message::QueryChanged)
+                    .on_clear(Message::QueryChanged(String::new())),
+            )
+            .push(crate::ui::list::list(
+                &self.contacts,
+                self.selected.as_ref(),
+                &self.query,
+            ))
+            .width(Length::Fixed(320.0));
+
+        let right: Element<'_, Message> = match &self.editor {
+            Some(state) => self.editor_pane(state),
+            None => match self.selected_contact() {
+                Some(contact) => crate::ui::list::detail(
+                    contact,
+                    self.store
+                        .as_ref()
+                        .and_then(|s| s.book(&contact.addressbook_id))
+                        .map(|b| b.name.as_str()),
+                    self.photo.as_ref(),
+                ),
+                None => widget::container(
+                    widget::text::body(fl!("no-selection"))
+                        .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
+                )
+                .padding(spacing.space_m)
+                .into(),
+            },
+        };
+
+        let content = widget::row::with_capacity(3)
+            .push(list)
+            .push(widget::divider::vertical::default())
+            .push(widget::container(right).width(Length::Fill));
+
+        // The toaster overlays transient errors without stealing focus, which
+        // is what a failed save needs: the editor is still open behind it and
+        // the user's text is still there.
+        widget::toaster(&self.toasts, content)
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        Subscription::batch(vec![
+            self.core()
+                .watch_config::<Config>(Self::APP_ID)
+                .map(|update| {
+                    for why in update.errors {
+                        tracing::debug!(?why, "config watch error");
+                    }
+                    Message::UpdateConfig(update.config)
+                }),
+            file_watch_subscription(),
+            // Only `Ignored` presses: a focused text input has already claimed
+            // anything it wants, so the editor keeps its own keys. The physical
+            // key travels too — it is what lets Ctrl+N fire on a Greek or
+            // Cyrillic layout, where the logical key is not "n".
+            cosmic::iced::event::listen_with(|event, status, _window| match (event, status) {
+                (
+                    cosmic::iced::Event::Keyboard(cosmic::iced::keyboard::Event::KeyPressed {
+                        modifiers,
+                        key,
+                        physical_key,
+                        ..
+                    }),
+                    cosmic::iced::event::Status::Ignored,
+                ) => Some(Message::Key(modifiers, key, physical_key)),
+                _ => None,
+            }),
+        ])
+    }
+
+    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        match message {
+            Message::LaunchUrl(url) => {
+                if let Err(why) = open::that_detached(&url) {
+                    tracing::warn!(url, %why, "could not open the link");
+                }
+            }
+            Message::ToggleContextPage(page) => {
+                if self.context_page == page {
+                    self.core.window.show_context = !self.core.window.show_context;
+                } else {
+                    self.context_page = page;
+                    self.core.window.show_context = true;
+                }
+            }
+            Message::UpdateConfig(config) => {
+                self.config = config;
+                self.rebuild_nav();
+                self.reload();
+            }
+            Message::QueryChanged(query) => {
+                self.query = query;
+                self.reload();
+            }
+            Message::Select(key) => {
+                self.selected = Some(key);
+                self.reload_photo();
+            }
+            Message::Copy(value) => return cosmic::iced::clipboard::write(value),
+            // A burst of filesystem changes and an explicit refresh do the same
+            // work; they are separate messages only so the logs distinguish
+            // "vdirsyncer ran" from "the user pressed Ctrl+R".
+            Message::FilesChanged | Message::Refresh => {
+                if let Some(store) = self.store.as_mut() {
+                    store.refresh();
+                }
+                self.rebuild_nav();
+                self.reload();
+            }
+            Message::Key(modifiers, key, physical) => {
+                for (bind, action) in &self.key_binds {
+                    if bind.matches(modifiers, &key, Some(&physical)) {
+                        return self.update(action.message());
+                    }
+                }
+            }
+            Message::FocusSearch => return widget::text_input::focus(search_id()),
+            Message::CloseToast(id) => self.toasts.remove(id),
+
+            Message::ToggleBook(id) => {
+                self.config.toggle_book(&id);
+                self.persist_config();
+                self.rebuild_nav();
+                self.reload();
+            }
+            Message::SortByGivenName(value) => {
+                self.config.sort_by_given_name = value;
+                self.persist_config();
+                self.reload();
+            }
+            Message::DefaultBook(index) => {
+                self.config.default_book = self.writable_ids.get(index).cloned();
+                self.persist_config();
+            }
+
+            Message::NewContact => {
+                // The menu items are disabled while the editor is open, but the
+                // key bindings are not routed through the menu — without this
+                // guard Ctrl+N mid-edit would replace the editor's state and
+                // silently discard whatever had been typed.
+                if self.editor.is_some() {
+                    return Task::none();
+                }
+                let Some(store) = self.store.as_ref() else {
+                    return Task::none();
+                };
+                let books: Vec<CalendarMeta> = store.books().to_vec();
+                let target = self
+                    .config
+                    .default_book
+                    .as_deref()
+                    .filter(|id| books.iter().any(|b| b.id == *id && !b.read_only))
+                    .map(ToOwned::to_owned)
+                    .or_else(|| store.default_book().map(|b| b.id.clone()));
+
+                match target {
+                    Some(book) => self.editor = Some(editor::State::create(&book, &books)),
+                    // Every book read-only, or none at all. Saying so is the
+                    // whole job here — an editor that cannot save is a trap.
+                    None => return self.toast(fl!("error-no-writable-book")),
+                }
+            }
+            Message::EditContact => {
+                if self.editor.is_some() {
+                    return Task::none();
+                }
+                let Some(contact) = self.selected_contact().cloned() else {
+                    return Task::none();
+                };
+                let books: Vec<CalendarMeta> = self
+                    .store
+                    .as_ref()
+                    .map(|s| s.books().to_vec())
+                    .unwrap_or_default();
+
+                if books
+                    .iter()
+                    .any(|b| b.id == contact.addressbook_id && b.read_only)
+                {
+                    let name = self
+                        .store
+                        .as_ref()
+                        .and_then(|s| s.book(&contact.addressbook_id))
+                        .map_or_else(|| contact.addressbook_id.clone(), |b| b.name.clone());
+                    return self.toast(fl!("read-only-book", name = name));
+                }
+
+                self.editor = Some(editor::State::edit(contact, &books));
+            }
+            Message::Editor(message) => {
+                if let Some(state) = self.editor.as_mut() {
+                    state.update(message);
+                }
+            }
+            Message::EditorSave => return self.save_editor(),
+            Message::EditorCancel => self.editor = None,
+
+            Message::ImportRequested => {
+                return cosmic::task::future(async {
+                    use cosmic::dialog::file_chooser::{self, FileFilter};
+
+                    let dialog = file_chooser::open::Dialog::new()
+                        .title(fl!("import"))
+                        .filter(FileFilter::new("vCard").glob("*.vcf"));
+
+                    match dialog.open_file().await {
+                        Ok(response) => match response.url().to_file_path() {
+                            Ok(path) => Message::ImportPath(path),
+                            Err(()) => Message::DialogFailed(fl!("error-remote-file")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                        Err(why) => Message::DialogFailed(why.to_string()),
+                    }
+                });
+            }
+            Message::ImportPath(path) => return self.import(&path),
+
+            Message::ExportRequested => {
+                // The active nav filter decides the scope: one book exports
+                // under its own name, "All contacts" exports every visible book
+                // into one file.
+                let (name, ids) = match self.nav.active_data::<NavEntry>() {
+                    Some(NavEntry::Book(id)) => {
+                        let name = self
+                            .store
+                            .as_ref()
+                            .and_then(|s| s.book(id))
+                            .map_or_else(|| id.clone(), |b| b.name.clone());
+                        (name, vec![id.clone()])
+                    }
+                    _ => {
+                        let ids: Vec<String> = self
+                            .store
+                            .as_ref()
+                            .map(|s| {
+                                s.books()
+                                    .iter()
+                                    .filter(|b| !self.config.is_hidden(&b.id))
+                                    .map(|b| b.id.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (fl!("all-contacts"), ids)
+                    }
+                };
+                if ids.is_empty() {
+                    return self.toast(fl!("error-no-writable-book"));
+                }
+
+                return cosmic::task::future(async move {
+                    use cosmic::dialog::file_chooser::{self, FileFilter};
+
+                    let dialog = file_chooser::save::Dialog::new()
+                        .title(fl!("export"))
+                        .file_name(format!("{name}.vcf"))
+                        .filter(FileFilter::new("vCard").glob("*.vcf"));
+
+                    match dialog.save_file().await {
+                        Ok(response) => match response.url().and_then(|u| u.to_file_path().ok()) {
+                            Some(path) => Message::ExportTo(path, ids),
+                            None => Message::DialogFailed(fl!("error-remote-file")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                        Err(why) => Message::DialogFailed(why.to_string()),
+                    }
+                });
+            }
+            Message::ExportTo(path, book_ids) => {
+                let Some(store) = self.store.as_ref() else {
+                    return Task::none();
+                };
+                let mut text = String::new();
+                for id in &book_ids {
+                    match store.export_book(id) {
+                        Ok(part) => text.push_str(&part),
+                        Err(why) => return self.toast(why.to_string()),
+                    }
+                }
+                match std::fs::write(&path, text) {
+                    Ok(()) => return self.toast(fl!("export-done", path = file_label(&path))),
+                    Err(why) => return self.toast(format!("{}: {why}", file_label(&path))),
+                }
+            }
+            Message::DialogCancelled => {}
+            Message::DialogFailed(why) => return self.toast(why),
+
+            Message::DeleteRequested => {
+                if self.editor.is_some() {
+                    return Task::none();
+                }
+                if let Some(contact) = self.selected_contact() {
+                    self.dialog = Some(Dialog::ConfirmDelete {
+                        key: ContactKey::of(contact),
+                        name: contact.label(),
+                    });
+                }
+            }
+            Message::DeleteConfirmed => {
+                let Some(Dialog::ConfirmDelete { key, name }) = self.dialog.take() else {
+                    return Task::none();
+                };
+                let Some(store) = self.store.as_mut() else {
+                    return Task::none();
+                };
+                if let Err(why) = store.delete(&key.book, &key.uid) {
+                    return self.toast(fl!("error-delete", name = name, why = why.to_string()));
+                }
+                self.selected = None;
+                self.editor = None;
+                self.reload();
+            }
+            Message::DialogCancel => self.dialog = None,
+        }
+        Task::none()
+    }
+}
+
+impl AppModel {
+    /// Updates the header and window titles.
+    fn update_title(&mut self) -> Task<Message> {
+        let mut title = fl!("app-title");
+        if let Some(NavEntry::Book(id)) = self.nav.active_data::<NavEntry>()
+            && let Some(book) = self.store.as_ref().and_then(|s| s.book(id))
+        {
+            title.push_str(" — ");
+            title.push_str(&book.name);
+        }
+
+        if let Some(id) = self.core.main_window_id() {
+            self.set_window_title(title, id)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Rebuilds the nav bar from the books on disk, keeping the active entry
+    /// where it can be kept.
+    ///
+    /// Called after anything that can change the set of books — a sync creating
+    /// a collection, a book being hidden in settings — because a nav bar built
+    /// once at startup silently stops listing an address book that appears
+    /// afterwards.
+    fn rebuild_nav(&mut self) {
+        self.rebuild_writable();
+        let previous = self.nav.active_data::<NavEntry>().cloned();
+
+        self.nav = nav_bar::Model::default();
+        self.nav
+            .insert()
+            .text(fl!("all-contacts"))
+            .data(NavEntry::All)
+            .icon(widget::icon::from_name("system-users-symbolic"));
+
+        let books: Vec<CalendarMeta> = self
+            .store
+            .as_ref()
+            .map(|s| s.books().to_vec())
+            .unwrap_or_default();
+
+        for book in books.iter().filter(|b| !self.config.is_hidden(&b.id)) {
+            self.nav
+                .insert()
+                .text(book.name.clone())
+                .data(NavEntry::Book(book.id.clone()))
+                .icon(widget::icon::from_name("avatar-default-symbolic"));
+        }
+
+        // Restore the previous filter if that book still exists, else fall back
+        // to "All" rather than leaving nothing active — `active_data` returning
+        // `None` would filter the list down to nothing at all.
+        let restored = previous.and_then(|previous| {
+            self.nav
+                .iter()
+                .find(|id| self.nav.data::<NavEntry>(*id) == Some(&previous))
+        });
+        match restored {
+            Some(id) => self.nav.activate(id),
+            None => {
+                self.nav.activate_position(0);
+            }
+        }
+    }
+
+    /// Re-reads the address book, applying the current book filter and query.
+    ///
+    /// Read straight from disk rather than cached: an address book is a few
+    /// hundred kilobytes of text, and a cache that can go stale behind a
+    /// vdirsyncer run is worse than the read it saves. See the note in
+    /// `cosmic_pim_core::store::contacts`.
+    fn reload(&mut self) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+
+        let filter = match self.nav.active_data::<NavEntry>() {
+            Some(NavEntry::Book(id)) => Some(id.clone()),
+            _ => None,
+        };
+
+        self.contacts = store
+            .search(&self.query)
+            .into_iter()
+            .filter(|c| match &filter {
+                Some(id) => c.addressbook_id == *id,
+                // "All contacts" still respects what the user hid: a book
+                // unticked in settings should not come back through the front
+                // door.
+                None => !self.config.is_hidden(&c.addressbook_id),
+            })
+            .collect();
+
+        if self.config.sort_by_given_name {
+            self.contacts.sort_by_key(|c| {
+                (
+                    c.name.given.to_lowercase(),
+                    c.name.family.to_lowercase(),
+                    c.label().to_lowercase(),
+                )
+            });
+        }
+
+        // Drop a selection the query has filtered away, or the detail pane
+        // keeps showing someone who is no longer in the list.
+        if self
+            .selected
+            .as_ref()
+            .is_some_and(|key| !self.contacts.iter().any(|c| key.matches(c)))
+        {
+            self.selected = None;
+        }
+        // The bytes on disk may have changed even if the selection did not —
+        // that is exactly what a sync run editing the open card looks like.
+        self.reload_photo();
+    }
+
+    /// Re-decodes the selected contact's photo into the one-entry cache.
+    fn reload_photo(&mut self) {
+        self.photo = self
+            .selected_contact()
+            .filter(|c| c.has_photo)
+            .and_then(|c| cosmic_pim_core::vcard::photo(&c.raw))
+            .and_then(|photo| match photo {
+                cosmic_pim_core::vcard::Photo::Bytes { data, .. } => {
+                    Some(widget::image::Handle::from_bytes(data))
+                }
+                // A remote avatar is never fetched — network access for a
+                // contact photo is off by design (03: opt-in "if ever").
+                cosmic_pim_core::vcard::Photo::Uri(_) => None,
+            });
+    }
+
+    fn selected_contact(&self) -> Option<&Contact> {
+        let key = self.selected.as_ref()?;
+        self.contacts.iter().find(|c| key.matches(c))
+    }
+
+    fn writable_books(&self) -> Vec<CalendarMeta> {
+        self.store
+            .as_ref()
+            .map(|s| s.books().iter().filter(|b| !b.read_only).cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn rebuild_writable(&mut self) {
+        let books = self.writable_books();
+        self.writable_ids = books.iter().map(|b| b.id.clone()).collect();
+        self.writable_names = books.iter().map(|b| b.name.clone()).collect();
+    }
+
+    fn persist_config(&mut self) {
+        let Some(handler) = self.config_handler.as_ref() else {
+            tracing::warn!("no configuration handler; this setting will not persist");
+            return;
+        };
+        if let Err(why) = self.config.write_entry(handler) {
+            tracing::error!(%why, "could not save the configuration");
+        }
+    }
+
+    /// Imports the cards in a `.vcf` file into the default book, UID-keyed so
+    /// re-importing updates rather than duplicates.
+    fn import(&mut self, path: &std::path::Path) -> Task<Message> {
+        let Some(book_id) = self
+            .config
+            .default_book
+            .clone()
+            .filter(|id| {
+                self.store
+                    .as_ref()
+                    .and_then(|s| s.book(id))
+                    .is_some_and(|b| !b.read_only)
+            })
+            .or_else(|| {
+                self.store
+                    .as_ref()
+                    .and_then(|s| s.default_book())
+                    .map(|b| b.id.clone())
+            })
+        else {
+            return self.toast(fl!("error-no-writable-book"));
+        };
+
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(why) => return self.toast(format!("{}: {why}", file_label(path))),
+        };
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        match store.import_vcf(&text, &book_id) {
+            Ok(summary) if summary.total() == 0 => {
+                self.toast(fl!("import-empty", path = file_label(path)))
+            }
+            Ok(summary) => {
+                self.reload();
+                self.toast(fl!(
+                    "import-done",
+                    added = summary.added.to_string(),
+                    updated = summary.updated.to_string()
+                ))
+            }
+            Err(why) => self.toast(why.to_string()),
+        }
+    }
+
+    /// Commits the editor to the store.
+    fn save_editor(&mut self) -> Task<Message> {
+        let Some(state) = self.editor.as_ref() else {
+            return Task::none();
+        };
+        if !state.is_saveable() {
+            return Task::none();
+        }
+
+        let contact = state.finish();
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        if let Err(why) = store.save(&contact) {
+            // Deliberately keeps the editor open: the save failed, so the
+            // user's text is the only copy that exists.
+            return self.toast(fl!(
+                "error-save",
+                name = contact.label(),
+                why = why.to_string()
+            ));
+        }
+
+        self.editor = None;
+        self.selected = Some(ContactKey::of(&contact));
+        self.reload();
+        Task::none()
+    }
+
+    fn toast(&mut self, message: String) -> Task<Message> {
+        self.toasts
+            .push(widget::Toast::new(message))
+            .map(Into::into)
+    }
+
+    /// The editor pane, with its own save/cancel bar.
+    fn editor_pane<'a>(&'a self, state: &'a editor::State) -> Element<'a, Message> {
+        let spacing = cosmic::theme::spacing();
+
+        let title = if state.is_new {
+            fl!("new-contact")
+        } else {
+            fl!("edit-contact")
+        };
+
+        let mut save = widget::button::suggested(fl!("save"));
+        // Disabled rather than hidden, and disabled only for the one reason a
+        // save can be refused: a card with no name at all would be a row nobody
+        // could find again.
+        if state.is_saveable() {
+            save = save.on_press(Message::EditorSave);
+        }
+
+        let bar = widget::row::with_capacity(4)
+            .align_y(cosmic::iced::Alignment::Center)
+            .spacing(spacing.space_xs)
+            .push(widget::text::title4(title))
+            .push(widget::Space::new().width(Length::Fill))
+            .push(widget::button::standard(fl!("cancel")).on_press(Message::EditorCancel))
+            .push(save);
+
+        widget::column::with_capacity(2)
+            .spacing(spacing.space_s)
+            .padding(spacing.space_s)
+            .push(bar)
+            .push(editor::view(state).map(Message::Editor))
+            .into()
+    }
+
+    fn settings_view(&self) -> Element<'_, Message> {
+        let spacing = cosmic::theme::spacing();
+        let mut column = widget::column::with_capacity(2).spacing(spacing.space_m);
+
+        let selected = self
+            .config
+            .default_book
+            .as_ref()
+            .and_then(|id| self.writable_ids.iter().position(|b| b == id));
+
+        let mut general = widget::settings::section().title(fl!("view")).add(
+            widget::settings::item::builder(fl!("sort-by-given-name"))
+                .description(fl!("sort-by-given-name-description"))
+                .toggler(self.config.sort_by_given_name, Message::SortByGivenName),
+        );
+        if !self.writable_names.is_empty() {
+            general = general.add(
+                widget::settings::item::builder(fl!("default-book")).control(widget::dropdown(
+                    &self.writable_names,
+                    selected,
+                    Message::DefaultBook,
+                )),
+            );
+        }
+        column = column.push(general);
+
+        let books = self
+            .store
+            .as_ref()
+            .map(|s| s.books().to_vec())
+            .unwrap_or_default();
+        if !books.is_empty() {
+            let mut section = widget::settings::section().title(fl!("address-books"));
+            for book in books {
+                let id = book.id.clone();
+                section = section.add(
+                    widget::settings::item::builder(book.name.clone())
+                        .description(if book.read_only {
+                            fl!("read-only-book", name = book.name.clone())
+                        } else {
+                            fl!("show-book")
+                        })
+                        .toggler(!self.config.is_hidden(&book.id), move |_| {
+                            Message::ToggleBook(id.clone())
+                        }),
+                );
+            }
+            column = column.push(section);
+        }
+
+        column.into()
+    }
+}
+
+/// A path's file name, for messages — the full path is noise in a toast.
+fn file_label(path: &std::path::Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
+}
+
+/// Notices changes made by anything other than us — a sync run, `khard`, a text
+/// editor — and reloads the list.
+///
+/// Without this the app is only correct until the moment something else touches
+/// the vdir, and there is no indication anything is stale.
+fn file_watch_subscription() -> Subscription<Message> {
+    use cosmic::iced::futures::SinkExt;
+
+    Subscription::run(|| {
+        cosmic::iced::stream::channel(
+            1,
+            |mut output: cosmic::iced::futures::channel::mpsc::Sender<_>| async move {
+                let root = cosmic_pim_core::store::contacts::default_root();
+
+                match cosmic_pim_core::store::watcher::watch(&root) {
+                    Ok((_watch, mut rx)) => {
+                        while rx.recv().await.is_some() {
+                            if output.send(Message::FilesChanged).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(why) => {
+                        tracing::warn!(
+                            %why,
+                            "cannot watch the contacts directory; external changes will need a refresh"
+                        );
+                        // Park forever rather than returning: a finished stream
+                        // would make iced restart the subscription in a tight
+                        // loop.
+                        std::future::pending::<()>().await;
+                    }
+                }
+            },
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contact(book: &str, uid: &str) -> Contact {
+        let mut c = Contact::draft(book);
+        c.uid = uid.to_owned();
+        c
+    }
+
+    /// The same UID in two books is two people as far as the list is concerned;
+    /// keying on the UID alone made them one row.
+    #[test]
+    fn a_key_distinguishes_the_same_uid_in_two_books() {
+        let personal = contact("personal", "shared-uid");
+        let work = contact("work", "shared-uid");
+
+        let key = ContactKey::of(&personal);
+        assert!(key.matches(&personal));
+        assert!(!key.matches(&work));
+    }
+
+    #[test]
+    fn a_key_round_trips_through_the_contact_it_came_from() {
+        let c = contact("personal", "abc");
+        let key = ContactKey::of(&c);
+        assert_eq!(key.book, "personal");
+        assert_eq!(key.uid, "abc");
+    }
+}
