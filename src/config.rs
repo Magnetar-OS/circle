@@ -30,6 +30,14 @@ pub struct Config {
     /// Held as an id rather than an index so that adding an account, which
     /// reorders nothing but inserts a directory, cannot silently retarget it.
     pub default_book: Option<String>,
+
+    /// Serialise **new** cards as vCard 4.0 rather than 3.0.
+    ///
+    /// Off by default: Nextcloud and most CardDAV servers are 3.0-first, and a
+    /// 4.0 card handed to a 3.0-only peer is the interop failure users hit.
+    /// Existing cards always keep the version their own bytes declare — the
+    /// patcher never converts, so this switch touches only creation.
+    pub prefer_vcard4: bool,
 }
 
 impl Config {

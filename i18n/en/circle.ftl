@@ -99,6 +99,17 @@ add-address = Add an address
 add-url = Add a website
 add-nickname = Add a nickname
 
+photo = Photo
+set-photo = Set photo…
+undo = Undo
+photo-current = This card has a photo.
+photo-none = No photo.
+photo-pending = { $name } will be set on save.
+photo-removing = The photo is removed on save.
+error-photo = The photo could not be changed: { $why }
+
+groups = Groups
+
 confirm-delete-title = Delete { $name }?
 confirm-delete-body =
     The contact file is removed from this address book. If the book is synced,
@@ -115,6 +126,10 @@ error-remote-file = That location is not a local file.
 
 ## Settings
 
+prefer-vcard4 = New contacts use vCard 4.0
+prefer-vcard4-description =
+    Off writes vCard 3.0, which every CardDAV server accepts. Existing
+    contacts always keep their own version.
 sort-by-given-name = Sort by first name
 sort-by-given-name-description = Off sorts by last name, the way a phone book reads.
 default-book = New contacts go to

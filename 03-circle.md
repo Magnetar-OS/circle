@@ -17,27 +17,30 @@ profiling says otherwise.
 
 ## Gaps, dependency-ordered
 
-### 1. Write path — DONE except the version choice
+### 1. Write path — DONE
 
-Done: field editors over patches, add/remove with TYPE labels, one PREF per
-list, create, delete with confirmation, and the "other fields" honesty section
+Field editors over patches, add/remove with TYPE labels, one PREF per list,
+create, delete with confirmation, and the "other fields" honesty section
 (detail pane and editor both list what the card carries that Circle won't
 touch, in the card's own spelling).
 
-Open: new cards serialise as vCard 4.0 only — `core::to_vcard` has no 3.0
-writer, so the "3.0 default for Nextcloud compatibility" decision is blocked
-in the substrate, not here. A settings toggle before the writer exists would
-be a lie; add the writer first.
+Version policy landed as specified: new cards default to **3.0**
+(`core::to_vcard_versioned`, spelling preference as `TYPE=PREF` per RFC 2426
+and BDAY in extended form), 4.0 on explicit choice in settings, and
+conversion is never silent — a patch writes in the card's own declared
+dialect (`declared_version`), so editing a 4.0 card cannot downgrade it and
+editing a 3.0 card cannot plant `PREF=1` in it.
 
-### 2. Photos — display DONE, write open
+### 2. Photos — DONE
 
-Done: `core::vcard::photo()` decodes both inline forms (3.0 `ENCODING=b`,
-4.0 `data:`); the detail pane shows it, decoded once per selection, not per
-frame. URI-form photos are surfaced as URIs and never fetched.
-
-Open: set/replace/remove through the patcher (an `Edit::set` on PHOTO plus a
-file chooser and base64 encode). Network avatar fetching stays opt-in only,
-off by default, if ever.
+`core::vcard::photo()` decodes both inline forms (3.0 `ENCODING=b`, 4.0
+`data:`); the detail pane shows it, decoded once per selection, not per
+frame. Set/replace/remove go through `core::vcard::set_photo`/`remove_photo`
+— byte-preserving patches in the card's own dialect (`ENCODING=b;TYPE=` for
+3.0, `data:` URI for 4.0) — applied by the shell against the saved bytes, so
+the flow is identical for new and existing cards. URI-form photos are
+surfaced as URIs and never fetched; network avatar fetching stays opt-in
+only, off by default, if ever.
 
 ### 3. Parity with Slate's shell — largely DONE
 
@@ -56,12 +59,17 @@ Open:
 - CSV import with an explicit column-mapping screen, no silent guessing.
 - Export in 3.0 — same substrate blocker as tier 1.
 
-### 4. Groups
+### 4. Groups — CATEGORIES half DONE
 
-Both mechanisms, because servers disagree and this is a data-loss site:
-CATEGORIES on cards *and* KIND:group / addressbook-group cards. Per-server
-behavior goes in the substrate quirks table (01). UI: sidebar groups, drag or
-menu assignment, group as compose-list.
+Done: sidebar groups read live off the cards' `CATEGORIES` (a group with no
+members stops existing — nothing stored, nothing to migrate), filtering the
+list; assignment through the editor's categories field; the detail pane shows
+them as chips.
+
+Open: `KIND:group` / addressbook-group cards — the other mechanism, kept
+separate because servers disagree and this is a data-loss site. Waits on the
+per-server quirks table (01), which is now being built. Drag-to-assign and
+group-as-compose-list also open.
 
 ### 5. Linking (the distinguishing model)
 

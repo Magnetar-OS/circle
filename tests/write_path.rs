@@ -272,3 +272,109 @@ fn saving_into_a_read_only_book_is_an_error() {
         "the card changed anyway"
     );
 }
+
+/// The version policy, end to end: new cards default to 3.0 with its own
+/// preference spelling; 4.0 is the explicit choice; an existing card keeps its
+/// version through an edit.
+#[test]
+fn new_cards_default_to_v3_and_the_choice_is_explicit() {
+    use cosmic_pim_core::vcard::WriteVersion;
+
+    let mut fixture = fixture();
+
+    let mut editor = State::create(&fixture.book.id, fixture.store.books());
+    editor.update(Message::Text(Field::Given, "Grace".into()));
+    editor.update(Message::ListAdd(ListKind::Email));
+    editor.update(Message::ListValue(
+        ListKind::Email,
+        0,
+        "g@example.com".into(),
+    ));
+    editor.update(Message::ListPreferred(ListKind::Email, 0));
+    let grace = editor.finish();
+
+    // The default path — what Circle's save uses with the toggle off.
+    fixture.store.save(&grace).unwrap();
+    let on_disk = std::fs::read_to_string(
+        fixture.book.path.join(
+            &fixture
+                .store
+                .contact(&fixture.book.id, &grace.uid)
+                .unwrap()
+                .file_name,
+        ),
+    )
+    .unwrap();
+    assert!(on_disk.contains("VERSION:3.0"), "{on_disk}");
+    assert!(
+        on_disk.contains("TYPE=pref") || on_disk.contains("TYPE=home,pref"),
+        "{on_disk}"
+    );
+    assert!(
+        !on_disk.contains("PREF="),
+        "4.0 syntax in a 3.0 card: {on_disk}"
+    );
+
+    // The explicit choice.
+    let mut editor = State::create(&fixture.book.id, fixture.store.books());
+    editor.update(Message::Text(Field::Given, "Alan".into()));
+    let alan = editor.finish();
+    fixture.store.save_as(&alan, WriteVersion::V4).unwrap();
+    let alan_file = fixture
+        .store
+        .contact(&fixture.book.id, &alan.uid)
+        .unwrap()
+        .file_name;
+    let on_disk = std::fs::read_to_string(fixture.book.path.join(alan_file)).unwrap();
+    assert!(on_disk.contains("VERSION:4.0"), "{on_disk}");
+
+    // Editing the synced 4.0 seed card must not downgrade it.
+    let mut editor = fixture.editor();
+    editor.update(Message::Text(Field::Family, "Byron".into()));
+    fixture.store.save(&editor.finish()).unwrap();
+    assert!(
+        fixture.on_disk().contains("VERSION:4.0"),
+        "an edit converted the card's version"
+    );
+}
+
+/// The photo write path the shell drives on save: read the saved bytes, patch
+/// the photo in (or out), write raw. Everything else on the card survives.
+#[test]
+fn setting_and_removing_a_photo_preserves_the_rest_of_the_card() {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+    use cosmic_pim_core::vcard::{Photo, photo, remove_photo, set_photo};
+
+    let fixture = fixture();
+    let png = [0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+
+    // Set: replaces the seed card's PHOTO, keeps its grouped label and GEO.
+    let saved = fixture.ada();
+    let patched = set_photo(&saved.raw, &png, "image/png").expect("patch");
+    write_contact_raw(&fixture.book, &saved.file_name, &patched).expect("write");
+
+    let back = fixture.ada();
+    assert!(back.has_photo);
+    match photo(&back.raw) {
+        Some(Photo::Bytes { data, .. }) => assert_eq!(data, png),
+        other => panic!("photo did not round trip: {other:?}"),
+    }
+    assert!(
+        back.raw.contains("item1.X-ABLabel:Summer house"),
+        "{}",
+        back.raw
+    );
+    assert!(back.raw.contains("GEO:"), "{}", back.raw);
+
+    // Remove: the photo goes, nothing else does.
+    let stripped = remove_photo(&back.raw).expect("patch");
+    write_contact_raw(&fixture.book, &back.file_name, &stripped).expect("write");
+    let back = fixture.ada();
+    assert!(!back.has_photo);
+    assert!(
+        back.raw.contains("item1.X-ABLabel:Summer house"),
+        "{}",
+        back.raw
+    );
+    assert_eq!(back.emails.len(), 2);
+}

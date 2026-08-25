@@ -44,9 +44,17 @@ Reading, searching, creating, editing, and deleting contacts all work.
   one preferred (`PREF`) entry per list. Edits patch the stored card rather than
   rebuilding it; see [Editing](#editing).
 - **Creating and deleting**, with a confirmation dialog before a delete.
-- **Photos display.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and the
-  4.0 `data:` forms) is decoded and shown beside the name. Remote photo URIs
-  are deliberately never fetched — no network for avatars, by design.
+- **Photos.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and the 4.0
+  `data:` forms) is decoded and shown beside the name, and the editor can set,
+  replace, or remove the photo — patched into the card in its own dialect.
+  Remote photo URIs are deliberately never fetched — no network for avatars,
+  by design.
+- **Version policy.** New contacts are written as vCard 3.0 — what Nextcloud
+  and most CardDAV servers speak natively — with a settings toggle for 4.0.
+  Existing contacts always keep the version their own bytes declare: edits
+  patch in the card's dialect and never convert.
+- **Groups** appear in the sidebar, read from the cards' `CATEGORIES`; pick
+  one to filter the list, assign through the editor's categories field.
 - **Import and export**, as `.vcf` through the file portal. Import is UID-keyed
   so re-importing the same export updates rather than duplicates; export writes
   the stored bytes verbatim, so nothing is lost in either direction. Opening a
@@ -63,8 +71,9 @@ Reading, searching, creating, editing, and deleting contacts all work.
 - **Settings** persist through `cosmic-config`: which books are shown, which
   book new contacts go to, and whether to sort by first or last name.
 
-Not yet: setting or removing a photo, groups as first-class objects, and CSV
-import — see [03-circle.md](03-circle.md) for the order those come in.
+Not yet: `KIND:group` cards (the second grouping mechanism — waits on the
+substrate's per-server quirks table), CSV import, and KDE Connect
+click-to-call — see [03-circle.md](03-circle.md).
 
 ## Building
 

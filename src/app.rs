@@ -55,6 +55,10 @@ impl ContactKey {
 enum NavEntry {
     All,
     Book(String),
+    /// A `CATEGORIES` value — the vCard-native half of groups (03, tier 4).
+    /// `KIND:group` cards are the other half and wait on the per-server
+    /// quirks table in the substrate.
+    Category(String),
 }
 
 /// Start-up options, from the command line or a D-Bus activation.
@@ -203,6 +207,7 @@ pub enum Message {
     ToggleBook(String),
     SortByGivenName(bool),
     DefaultBook(usize),
+    PreferVcard4(bool),
 
     NewContact,
     EditContact,
@@ -686,6 +691,10 @@ impl cosmic::Application for AppModel {
                 self.config.default_book = self.writable_ids.get(index).cloned();
                 self.persist_config();
             }
+            Message::PreferVcard4(value) => {
+                self.config.prefer_vcard4 = value;
+                self.persist_config();
+            }
 
             Message::NewContact => {
                 // The menu items are disabled while the editor is open, but the
@@ -742,6 +751,32 @@ impl cosmic::Application for AppModel {
                 self.editor = Some(editor::State::edit(contact, &books));
             }
             Message::Editor(message) => {
+                // The one editor message the shell answers itself: the file
+                // dialog is async, and the editor has no runtime to await it.
+                if matches!(message, editor::Message::PhotoPickRequested) {
+                    return cosmic::task::future(async {
+                        use cosmic::dialog::file_chooser::{self, FileFilter};
+
+                        let dialog = file_chooser::open::Dialog::new()
+                            .title(fl!("set-photo"))
+                            .filter(
+                                FileFilter::new(fl!("photo").as_str())
+                                    .glob("*.png")
+                                    .glob("*.jpg")
+                                    .glob("*.jpeg")
+                                    .glob("*.webp"),
+                            );
+
+                        match dialog.open_file().await {
+                            Ok(response) => match response.url().to_file_path() {
+                                Ok(path) => Message::Editor(editor::Message::PhotoChosen(path)),
+                                Err(()) => Message::DialogFailed(fl!("error-remote-file")),
+                            },
+                            Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                            Err(why) => Message::DialogFailed(why.to_string()),
+                        }
+                    });
+                }
                 if let Some(state) = self.editor.as_mut() {
                     state.update(message);
                 }
@@ -873,11 +908,18 @@ impl AppModel {
     /// Updates the header and window titles.
     fn update_title(&mut self) -> Task<Message> {
         let mut title = fl!("app-title");
-        if let Some(NavEntry::Book(id)) = self.nav.active_data::<NavEntry>()
-            && let Some(book) = self.store.as_ref().and_then(|s| s.book(id))
-        {
-            title.push_str(" — ");
-            title.push_str(&book.name);
+        match self.nav.active_data::<NavEntry>() {
+            Some(NavEntry::Book(id)) => {
+                if let Some(book) = self.store.as_ref().and_then(|s| s.book(id)) {
+                    title.push_str(" — ");
+                    title.push_str(&book.name);
+                }
+            }
+            Some(NavEntry::Category(category)) => {
+                title.push_str(" — ");
+                title.push_str(category);
+            }
+            _ => {}
         }
 
         if let Some(id) = self.core.main_window_id() {
@@ -919,6 +961,32 @@ impl AppModel {
                 .icon(widget::icon::from_name("avatar-default-symbolic"));
         }
 
+        // Groups, read off the cards' CATEGORIES rather than kept anywhere:
+        // the categories ARE the groups (tier 4's vCard-native half), so a
+        // group with no members simply stops existing — nothing to garbage
+        // collect, nothing to migrate.
+        let mut categories: Vec<String> = self
+            .store
+            .as_ref()
+            .map(|store| {
+                store
+                    .contacts()
+                    .iter()
+                    .filter(|c| !self.config.is_hidden(&c.addressbook_id))
+                    .flat_map(|c| c.categories.iter().cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        categories.sort();
+        categories.dedup();
+        for category in categories {
+            self.nav
+                .insert()
+                .text(category.clone())
+                .data(NavEntry::Category(category))
+                .icon(widget::icon::from_name("folder-symbolic"));
+        }
+
         // Restore the previous filter if that book still exists, else fall back
         // to "All" rather than leaving nothing active — `active_data` returning
         // `None` would filter the list down to nothing at all.
@@ -946,20 +1014,20 @@ impl AppModel {
             return;
         };
 
-        let filter = match self.nav.active_data::<NavEntry>() {
-            Some(NavEntry::Book(id)) => Some(id.clone()),
-            _ => None,
-        };
+        let filter = self.nav.active_data::<NavEntry>().cloned();
 
         self.contacts = store
             .search(&self.query)
             .into_iter()
             .filter(|c| match &filter {
-                Some(id) => c.addressbook_id == *id,
+                Some(NavEntry::Book(id)) => c.addressbook_id == *id,
+                Some(NavEntry::Category(category)) => {
+                    c.categories.contains(category) && !self.config.is_hidden(&c.addressbook_id)
+                }
                 // "All contacts" still respects what the user hid: a book
                 // unticked in settings should not come back through the front
                 // door.
-                None => !self.config.is_hidden(&c.addressbook_id),
+                _ => !self.config.is_hidden(&c.addressbook_id),
             })
             .collect();
 
@@ -1088,11 +1156,20 @@ impl AppModel {
         }
 
         let contact = state.finish();
+        let photo_edit = state.photo.clone();
+        let version = if self.config.prefer_vcard4 {
+            cosmic_pim_core::vcard::WriteVersion::V4
+        } else {
+            cosmic_pim_core::vcard::WriteVersion::V3
+        };
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
 
-        if let Err(why) = store.save(&contact) {
+        // The version applies to NEW cards only; an existing card keeps the
+        // version its bytes declare, because saving patches rather than
+        // converts.
+        if let Err(why) = store.save_as(&contact, version) {
             // Deliberately keeps the editor open: the save failed, so the
             // user's text is the only copy that exists.
             return self.toast(fl!(
@@ -1100,6 +1177,18 @@ impl AppModel {
                 name = contact.label(),
                 why = why.to_string()
             ));
+        }
+
+        // The photo change runs against the *saved* bytes, which is what makes
+        // it uniform for new and existing cards: after the save above, both
+        // have a card on disk to patch. The photo is not part of the model on
+        // purpose — see `Contact::has_photo` — so it cannot travel through
+        // `save_as`.
+        if let Err(why) = apply_photo_edit(store, &contact, &photo_edit) {
+            self.editor = None;
+            self.selected = Some(ContactKey::of(&contact));
+            self.reload();
+            return self.toast(fl!("error-photo", why = why));
         }
 
         self.editor = None;
@@ -1172,6 +1261,11 @@ impl AppModel {
                 )),
             );
         }
+        general = general.add(
+            widget::settings::item::builder(fl!("prefer-vcard4"))
+                .description(fl!("prefer-vcard4-description"))
+                .toggler(self.config.prefer_vcard4, Message::PreferVcard4),
+        );
         column = column.push(general);
 
         let books = self
@@ -1199,6 +1293,68 @@ impl AppModel {
         }
 
         column.into()
+    }
+}
+
+/// Applies the editor's photo intent to the just-saved card, through the
+/// substrate's byte-preserving photo patcher.
+///
+/// Reads the card back from the store first: only the saved bytes carry the
+/// card in its written form (a brand-new contact had no `raw` until now).
+fn apply_photo_edit(
+    store: &mut ContactStore,
+    contact: &Contact,
+    edit: &editor::PhotoEdit,
+) -> Result<(), String> {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+    use cosmic_pim_core::vcard::{remove_photo, set_photo};
+
+    let patched = match edit {
+        editor::PhotoEdit::Keep => return Ok(()),
+        editor::PhotoEdit::Set(path) => {
+            let data = std::fs::read(path).map_err(|why| why.to_string())?;
+            let mime = photo_mime(path);
+            let saved = store
+                .contact(&contact.addressbook_id, &contact.uid)
+                .ok_or_else(|| fl!("error-load-contacts"))?;
+            set_photo(&saved.raw, &data, mime).ok_or_else(|| fl!("error-load-contacts"))?
+        }
+        editor::PhotoEdit::Remove => {
+            let saved = store
+                .contact(&contact.addressbook_id, &contact.uid)
+                .ok_or_else(|| fl!("error-load-contacts"))?;
+            match remove_photo(&saved.raw) {
+                Some(patched) => patched,
+                // No card text to patch means no photo to remove.
+                None => return Ok(()),
+            }
+        }
+    };
+
+    let meta = store
+        .book(&contact.addressbook_id)
+        .ok_or_else(|| fl!("error-load-contacts"))?
+        .clone();
+    let file_name = store
+        .contact(&contact.addressbook_id, &contact.uid)
+        .map(|c| c.file_name)
+        .ok_or_else(|| fl!("error-load-contacts"))?;
+    write_contact_raw(&meta, &file_name, &patched).map_err(|why| why.to_string())
+}
+
+/// The MIME type an image file's extension implies. The photo bytes are
+/// written as-is; this only labels them.
+fn photo_mime(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => "image/jpeg",
     }
 }
 

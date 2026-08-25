@@ -82,6 +82,22 @@ pub enum AddressPart {
     Country,
 }
 
+/// What should happen to the card's photo on save.
+///
+/// Held as an intent rather than applied live because the photo lives in the
+/// card's raw bytes, which a *new* contact does not have until its first save
+/// — the shell applies this after the card exists. See `AppModel::save_editor`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum PhotoEdit {
+    /// Leave whatever the card carries.
+    #[default]
+    Keep,
+    /// Replace with the image file at this path.
+    Set(std::path::PathBuf),
+    /// Strip the PHOTO property.
+    Remove,
+}
+
 #[derive(Clone, Debug)]
 pub enum Message {
     Text(Field, String),
@@ -94,6 +110,13 @@ pub enum Message {
     AddressRemove(usize),
     AddressAdd,
     Book(usize),
+    /// Asks the shell to open its file dialog — the dialog is async and the
+    /// shell owns the async runtime, so the editor only raises its hand.
+    PhotoPickRequested,
+    /// The shell's answer.
+    PhotoChosen(std::path::PathBuf),
+    PhotoRemove,
+    PhotoKeep,
 }
 
 /// The editor's working state: a contact being edited or created.
@@ -115,6 +138,8 @@ pub struct State {
     pub books: Vec<String>,
     /// Human names for `books`, which `widget::dropdown` needs as a slice.
     pub book_names: Vec<String>,
+    /// The pending photo change, applied by the shell on save.
+    pub photo: PhotoEdit,
 }
 
 impl State {
@@ -134,6 +159,7 @@ impl State {
             categories_text,
             books: ids,
             book_names: names,
+            photo: PhotoEdit::Keep,
         }
     }
 
@@ -148,6 +174,7 @@ impl State {
             categories_text: String::new(),
             books: ids,
             book_names: names,
+            photo: PhotoEdit::Keep,
         }
     }
 
@@ -289,6 +316,11 @@ impl State {
                     self.contact.addressbook_id.clone_from(id);
                 }
             }
+            // Handled by the shell; nothing to record until the answer comes.
+            Message::PhotoPickRequested => {}
+            Message::PhotoChosen(path) => self.photo = PhotoEdit::Set(path),
+            Message::PhotoRemove => self.photo = PhotoEdit::Remove,
+            Message::PhotoKeep => self.photo = PhotoEdit::Keep,
         }
     }
 
@@ -380,6 +412,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         fl!("add-url"),
     ));
     column = column.push(nickname_section(state));
+    column = column.push(photo_section(state));
     column = column.push(other_section(state));
 
     widget::scrollable(column.padding(spacing.space_s))
@@ -622,6 +655,47 @@ fn address_section(state: &State) -> Element<'_, Message> {
 
     section
         .add(widget::button::text(fl!("add-address")).on_press(Message::AddressAdd))
+        .into()
+}
+
+/// The photo controls: set, remove, undo.
+///
+/// The file dialog itself lives in the shell (it is async); this section only
+/// records the intent and says plainly what will happen on save.
+fn photo_section(state: &State) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+
+    let status = match &state.photo {
+        PhotoEdit::Keep if state.contact.has_photo => fl!("photo-current"),
+        PhotoEdit::Keep => fl!("photo-none"),
+        PhotoEdit::Set(path) => fl!(
+            "photo-pending",
+            name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ),
+        PhotoEdit::Remove => fl!("photo-removing"),
+    };
+
+    let mut controls = widget::row::with_capacity(4)
+        .align_y(cosmic::iced::Alignment::Center)
+        .spacing(spacing.space_xs)
+        .push(widget::text::caption(status).class(cosmic::theme::Text::Custom(super::dim_text)))
+        .push(widget::button::standard(fl!("set-photo")).on_press(Message::PhotoPickRequested));
+
+    if state.photo != PhotoEdit::Keep {
+        controls =
+            controls.push(widget::button::standard(fl!("undo")).on_press(Message::PhotoKeep));
+    }
+    if state.contact.has_photo && state.photo == PhotoEdit::Keep {
+        controls =
+            controls.push(widget::button::standard(fl!("remove")).on_press(Message::PhotoRemove));
+    }
+
+    widget::settings::section()
+        .title(fl!("photo"))
+        .add(widget::settings::item::builder(fl!("photo")).control(controls))
         .into()
 }
 
