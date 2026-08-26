@@ -26,6 +26,9 @@ All notable changes to this project are documented here. The format follows
   `X-ADDRESSBOOKSERVER-KIND` form. Group cards can be created and deleted,
   and the editor toggles membership per group; membership edits rewrite only
   the group cards that changed, each in its own dialect.
+- CSV import with an explicit column-mapping screen — samples shown per
+  column, conservative pre-selection, nothing imported unconfirmed; a mapped
+  Unique ID column makes re-imports update rather than duplicate.
 - A pop-launcher plugin: `con <name>` searches contacts; the context menu
   copies an email or phone number or starts a mail without opening a window.
 - Single-instance activation: a second launch, `--new-contact`, `--search=`,

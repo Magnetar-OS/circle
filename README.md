@@ -76,8 +76,14 @@ Reading, searching, creating, editing, and deleting contacts all work.
 - **Settings** persist through `cosmic-config`: which books are shown, which
   book new contacts go to, and whether to sort by first or last name.
 
-Not yet: CSV import and KDE Connect click-to-call — see
-[03-circle.md](03-circle.md).
+- **CSV import** with an explicit column-mapping screen: every column is
+  shown with a sample of its data and a target dropdown, obvious headers are
+  pre-selected for confirmation, and nothing is imported until you say so.
+  Map a column to Unique ID and re-importing the same file updates contacts
+  instead of duplicating them.
+
+Not yet: KDE Connect click-to-call (the `tel:` buttons already reach it via
+the desktop handler when it is installed) — see [03-circle.md](03-circle.md).
 
 ## Building
 

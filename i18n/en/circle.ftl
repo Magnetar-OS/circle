@@ -131,6 +131,18 @@ import-done = Imported { $added } new, updated { $updated }.
 export-done = Saved { $path }.
 error-remote-file = That location is not a local file.
 
+## CSV import
+
+import-csv = Import CSV…
+csv-skip = Skip
+csv-uid = Unique ID
+csv-columns = Map { $count } rows
+csv-empty = There is nothing to import in that file.
+csv-import-done = Imported { $added }, updated { $updated }{ $skipped ->
+        [0] {""}
+       *[other] , skipped { $skipped } unnamed
+    }.
+
 ## Settings
 
 prefer-vcard4 = New contacts use vCard 4.0

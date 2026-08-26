@@ -53,11 +53,18 @@ Done:
   visible books, verbatim bytes both ways (`ContactStore::import_vcf` /
   `export_book`, multi-card files split into per-card verbatim segments).
 
+Also done since: CSV import with an explicit column-mapping screen — every
+column shown with a live sample and a target dropdown, conservative exact-name
+pre-selection only, nothing lands before the user confirms; a mapped UID makes
+re-import update through the patcher instead of duplicating. Export writes the
+stored bytes, so the 3.0/4.0 question does not arise for existing cards, and
+new cards follow the version setting.
+
 Open:
 - **tel:/sms: handoff** to KDE Connect where its D-Bus is present. The detail
-  pane already emits `tel:`/`mailto:` through the desktop handler.
-- CSV import with an explicit column-mapping screen, no silent guessing.
-- Export in 3.0 — same substrate blocker as tier 1.
+  pane already emits `tel:`/`mailto:` through the desktop handler, which KDE
+  Connect registers for when installed — direct D-Bus integration would only
+  remove one chooser step and cannot be verified without a paired phone.
 
 ### 4. Groups — DONE except drag and compose-list
 

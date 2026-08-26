@@ -16,6 +16,7 @@ use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::fl;
+use crate::ui::csv;
 use crate::ui::editor;
 
 const APP_ID: &str = "io.github.entro314labs.Circle";
@@ -180,6 +181,9 @@ pub struct AppModel {
 
     /// `Some` while a contact is being edited or created.
     editor: Option<editor::State>,
+    /// `Some` while a CSV mapping screen is up. Mutually exclusive with the
+    /// editor — both claim the right-hand pane.
+    csv: Option<csv::State>,
     /// `Some` while a confirmation dialog is up.
     dialog: Option<Dialog>,
 
@@ -233,6 +237,11 @@ pub enum Message {
 
     ImportRequested,
     ImportPath(PathBuf),
+    ImportCsvRequested,
+    ImportCsvPath(PathBuf),
+    Csv(csv::Message),
+    CsvConfirm,
+    CsvCancel,
     ExportRequested,
     ExportTo(PathBuf, Vec<String>),
     DialogCancelled,
@@ -262,6 +271,7 @@ pub enum MenuAction {
     Delete,
     Search,
     Import,
+    ImportCsv,
     Export,
     Refresh,
     Settings,
@@ -279,6 +289,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::Delete => Message::DeleteRequested,
             MenuAction::Search => Message::FocusSearch,
             MenuAction::Import => Message::ImportRequested,
+            MenuAction::ImportCsv => Message::ImportCsvRequested,
             MenuAction::Export => Message::ExportRequested,
             MenuAction::Refresh => Message::Refresh,
             MenuAction::Settings => Message::ToggleContextPage(ContextPage::Settings),
@@ -352,6 +363,7 @@ impl cosmic::Application for AppModel {
             photo: None,
             query: String::new(),
             editor: None,
+            csv: None,
             dialog: None,
             toasts: widget::Toasts::new(Message::CloseToast),
             fatal: None,
@@ -458,6 +470,7 @@ impl cosmic::Application for AppModel {
                     menu::Item::Button(fl!("new-group"), None, MenuAction::NewGroup),
                     menu::Item::Divider,
                     menu::Item::Button(fl!("import"), None, MenuAction::Import),
+                    menu::Item::Button(fl!("import-csv"), None, MenuAction::ImportCsv),
                     menu::Item::Button(fl!("export"), None, MenuAction::Export),
                     menu::Item::Divider,
                     menu::Item::Button(fl!("refresh"), None, MenuAction::Refresh),
@@ -520,6 +533,8 @@ impl cosmic::Application for AppModel {
     fn on_escape(&mut self) -> Task<Self::Message> {
         if self.dialog.is_some() {
             self.dialog = None;
+        } else if self.csv.is_some() {
+            self.csv = None;
         } else if self.editor.is_some() {
             self.editor = None;
         } else if !self.query.is_empty() {
@@ -616,9 +631,10 @@ impl cosmic::Application for AppModel {
             ))
             .width(Length::Fixed(320.0));
 
-        let right: Element<'_, Message> = match &self.editor {
-            Some(state) => self.editor_pane(state),
-            None => match self.selected_contact() {
+        let right: Element<'_, Message> = match (&self.csv, &self.editor) {
+            (Some(state), _) => self.csv_pane(state),
+            (None, Some(state)) => self.editor_pane(state),
+            (None, None) => match self.selected_contact() {
                 Some(contact) => crate::ui::list::detail(
                     contact,
                     self.store
@@ -751,7 +767,7 @@ impl cosmic::Application for AppModel {
                 // key bindings are not routed through the menu — without this
                 // guard Ctrl+N mid-edit would replace the editor's state and
                 // silently discard whatever had been typed.
-                if self.editor.is_some() {
+                if self.editor.is_some() || self.csv.is_some() {
                     return Task::none();
                 }
                 let Some(store) = self.store.as_ref() else {
@@ -778,7 +794,7 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::EditContact => {
-                if self.editor.is_some() {
+                if self.editor.is_some() || self.csv.is_some() {
                     return Task::none();
                 }
                 let Some(contact) = self.selected_contact().cloned() else {
@@ -858,6 +874,40 @@ impl cosmic::Application for AppModel {
                 });
             }
             Message::ImportPath(path) => return self.import(&path),
+
+            Message::ImportCsvRequested => {
+                if self.editor.is_some() {
+                    // The editor owns the pane and possibly unsaved text.
+                    return Task::none();
+                }
+                return cosmic::task::future(async {
+                    use cosmic::dialog::file_chooser::{self, FileFilter};
+
+                    let dialog = file_chooser::open::Dialog::new()
+                        .title(fl!("import-csv"))
+                        .filter(FileFilter::new("CSV").glob("*.csv"));
+
+                    match dialog.open_file().await {
+                        Ok(response) => match response.url().to_file_path() {
+                            Ok(path) => Message::ImportCsvPath(path),
+                            Err(()) => Message::DialogFailed(fl!("error-remote-file")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                        Err(why) => Message::DialogFailed(why.to_string()),
+                    }
+                });
+            }
+            Message::ImportCsvPath(path) => match csv::State::open(&path) {
+                Ok(state) => self.csv = Some(state),
+                Err(why) => return self.toast(why),
+            },
+            Message::Csv(message) => {
+                if let Some(state) = self.csv.as_mut() {
+                    state.update(message);
+                }
+            }
+            Message::CsvCancel => self.csv = None,
+            Message::CsvConfirm => return self.import_csv(),
 
             Message::ExportRequested => {
                 // The active nav filter decides the scope: one book exports
@@ -1396,6 +1446,90 @@ impl AppModel {
         self.toasts
             .push(widget::Toast::new(message))
             .map(Into::into)
+    }
+
+    /// Commits the CSV mapping: every row becomes a contact in the default
+    /// book; a row whose mapped UID already exists updates that contact
+    /// through the patcher instead of duplicating it.
+    fn import_csv(&mut self) -> Task<Message> {
+        let Some(state) = self.csv.as_ref() else {
+            return Task::none();
+        };
+        if !state.is_importable() {
+            return Task::none();
+        }
+        let version = self.write_version();
+        let Some(book_id) = self
+            .store
+            .as_ref()
+            .and_then(|s| s.default_book())
+            .map(|b| b.id.clone())
+        else {
+            return self.toast(fl!("error-no-writable-book"));
+        };
+
+        let (contacts, skipped) = state.contacts(&book_id);
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        let mut added = 0usize;
+        let mut updated = 0usize;
+        for mut contact in contacts {
+            // A mapped UID that already exists means "update that contact":
+            // adopt its file and raw bytes so the save patches losslessly.
+            if let Some(existing) = store.contact(&book_id, &contact.uid) {
+                contact.file_name = existing.file_name;
+                contact.raw = existing.raw;
+                updated += 1;
+            } else {
+                added += 1;
+            }
+            if let Err(why) = store.save_as(&contact, version) {
+                self.csv = None;
+                self.reload();
+                return self.toast(fl!(
+                    "error-save",
+                    name = contact.label(),
+                    why = why.to_string()
+                ));
+            }
+        }
+
+        self.csv = None;
+        self.rebuild_nav();
+        self.reload();
+        self.toast(fl!(
+            "csv-import-done",
+            added = added.to_string(),
+            updated = updated.to_string(),
+            skipped = skipped.to_string()
+        ))
+    }
+
+    /// The CSV mapping pane, with its own import/cancel bar.
+    fn csv_pane<'a>(&'a self, state: &'a csv::State) -> Element<'a, Message> {
+        let spacing = cosmic::theme::spacing();
+
+        let mut import = widget::button::suggested(fl!("import"));
+        if state.is_importable() {
+            import = import.on_press(Message::CsvConfirm);
+        }
+
+        let bar = widget::row::with_capacity(4)
+            .align_y(cosmic::iced::Alignment::Center)
+            .spacing(spacing.space_xs)
+            .push(widget::text::title4(fl!("import-csv")))
+            .push(widget::Space::new().width(Length::Fill))
+            .push(widget::button::standard(fl!("cancel")).on_press(Message::CsvCancel))
+            .push(import);
+
+        widget::column::with_capacity(2)
+            .spacing(spacing.space_s)
+            .padding(spacing.space_s)
+            .push(bar)
+            .push(csv::view(state).map(Message::Csv))
+            .into()
     }
 
     /// The editor pane, with its own save/cancel bar.

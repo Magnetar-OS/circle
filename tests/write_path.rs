@@ -466,3 +466,75 @@ fn toggling_membership_patches_the_group_card_and_only_it() {
         "a group card leaked into the contact list"
     );
 }
+
+/// CSV import, end to end: parse a real file, map, land in the store — and a
+/// re-import keyed on a mapped UID updates through the patcher rather than
+/// duplicating.
+#[test]
+fn csv_import_lands_and_a_uid_keyed_reimport_updates_losslessly() {
+    use circle::ui::csv;
+
+    let mut fixture = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.csv");
+    std::fs::write(
+        &path,
+        "First Name,Last Name,E-mail 1,UID\n\
+Grace,Hopper,grace@example.com,grace@import\n\
+\"Lovelace, Ada\",,ada2@example.com,ada2@import\n",
+    )
+    .unwrap();
+
+    let state = csv::State::open(&path).unwrap();
+    // Headers here pre-map exactly; a real user could remap in the UI.
+    let (contacts, skipped) = state.contacts(&fixture.book.id);
+    assert_eq!(skipped, 0);
+    for contact in &contacts {
+        fixture.store.save(contact).unwrap();
+    }
+    assert_eq!(
+        fixture.store.contacts().len(),
+        3,
+        "2 imported beside the seed card"
+    );
+
+    // Simulate a photo landing on the imported card from a sync…
+    let grace = fixture
+        .store
+        .contact(&fixture.book.id, "grace@import")
+        .unwrap();
+    let with_photo =
+        cosmic_pim_core::vcard::set_photo(&grace.raw, &[1, 2, 3], "image/png").unwrap();
+    cosmic_pim_core::store::contacts::write_contact_raw(
+        &fixture.book,
+        &grace.file_name,
+        &with_photo,
+    )
+    .unwrap();
+
+    // …then re-import the same file, adopting the existing card the way the
+    // shell does. The photo must survive the update.
+    let state = csv::State::open(&path).unwrap();
+    let (contacts, _) = state.contacts(&fixture.book.id);
+    for mut contact in contacts {
+        if let Some(existing) = fixture.store.contact(&fixture.book.id, &contact.uid) {
+            contact.file_name = existing.file_name;
+            contact.raw = existing.raw;
+        }
+        fixture.store.save(&contact).unwrap();
+    }
+
+    assert_eq!(
+        fixture.store.contacts().len(),
+        3,
+        "the re-import duplicated instead of updating"
+    );
+    let grace = fixture
+        .store
+        .contact(&fixture.book.id, "grace@import")
+        .unwrap();
+    assert!(
+        grace.has_photo,
+        "the CSV re-import destroyed the photo a sync had added"
+    );
+}

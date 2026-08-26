@@ -2,6 +2,7 @@
 
 //! Widgets and view helpers.
 
+pub mod csv;
 pub mod editor;
 pub mod list;
 
