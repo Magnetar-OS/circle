@@ -21,7 +21,11 @@ All notable changes to this project are documented here. The format follows
 - `.vcf` import and export through the file portal. Import is keyed on UID, so
   re-importing an export updates instead of duplicating; opening a `.vcf` from
   a file manager imports it.
-- Groups in the sidebar, read from the cards' `CATEGORIES`.
+- Groups in the sidebar, in both the ways vCards spell them: `CATEGORIES`
+  values, and `KIND:group` cards including Apple's
+  `X-ADDRESSBOOKSERVER-KIND` form. Group cards can be created and deleted,
+  and the editor toggles membership per group; membership edits rewrite only
+  the group cards that changed, each in its own dialect.
 - A pop-launcher plugin: `con <name>` searches contacts; the context menu
   copies an email or phone number or starts a mail without opening a window.
 - Single-instance activation: a second launch, `--new-contact`, `--search=`,

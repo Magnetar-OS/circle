@@ -110,6 +110,8 @@ pub enum Message {
     AddressRemove(usize),
     AddressAdd,
     Book(usize),
+    /// Membership toggled for the group row at this index.
+    GroupToggled(usize, bool),
     /// Asks the shell to open its file dialog — the dialog is async and the
     /// shell owns the async runtime, so the editor only raises its hand.
     PhotoPickRequested,
@@ -117,6 +119,19 @@ pub enum Message {
     PhotoChosen(std::path::PathBuf),
     PhotoRemove,
     PhotoKeep,
+}
+
+/// One group the contact could belong to, and whether it does.
+///
+/// `was_member` is kept beside `member` so the shell can apply only the
+/// *changes* on save — rewriting every group's member list on every contact
+/// save would churn files (and sync pushes) that did not change.
+#[derive(Clone, Debug)]
+pub struct GroupRow {
+    pub uid: String,
+    pub name: String,
+    pub member: bool,
+    pub was_member: bool,
 }
 
 /// The editor's working state: a contact being edited or created.
@@ -140,6 +155,9 @@ pub struct State {
     pub book_names: Vec<String>,
     /// The pending photo change, applied by the shell on save.
     pub photo: PhotoEdit,
+    /// Membership in the book's `KIND:group` cards, applied by the shell on
+    /// save — the membership lives on the group cards, not on this contact.
+    pub groups: Vec<GroupRow>,
 }
 
 impl State {
@@ -160,6 +178,7 @@ impl State {
             books: ids,
             book_names: names,
             photo: PhotoEdit::Keep,
+            groups: Vec::new(),
         }
     }
 
@@ -175,7 +194,23 @@ impl State {
             books: ids,
             book_names: names,
             photo: PhotoEdit::Keep,
+            groups: Vec::new(),
         }
+    }
+
+    /// Fills the group rows — called by the shell, which owns the store.
+    pub fn with_groups(mut self, groups: Vec<GroupRow>) -> Self {
+        self.groups = groups;
+        self
+    }
+
+    /// The membership rows whose state the user changed.
+    #[must_use]
+    pub fn changed_groups(&self) -> Vec<&GroupRow> {
+        self.groups
+            .iter()
+            .filter(|g| g.member != g.was_member)
+            .collect()
     }
 
     /// Whether the contact carries enough to be worth saving.
@@ -316,6 +351,11 @@ impl State {
                     self.contact.addressbook_id.clone_from(id);
                 }
             }
+            Message::GroupToggled(index, member) => {
+                if let Some(row) = self.groups.get_mut(index) {
+                    row.member = member;
+                }
+            }
             // Handled by the shell; nothing to record until the answer comes.
             Message::PhotoPickRequested => {}
             Message::PhotoChosen(path) => self.photo = PhotoEdit::Set(path),
@@ -413,6 +453,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     ));
     column = column.push(nickname_section(state));
     column = column.push(photo_section(state));
+    column = column.push(groups_section(state));
     column = column.push(other_section(state));
 
     widget::scrollable(column.padding(spacing.space_s))
@@ -697,6 +738,27 @@ fn photo_section(state: &State) -> Element<'_, Message> {
         .title(fl!("photo"))
         .add(widget::settings::item::builder(fl!("photo")).control(controls))
         .into()
+}
+
+/// Membership togglers, one per group card in the contact's book.
+///
+/// Absent entirely when the book has no groups: an empty section headed
+/// "In groups" would only prompt "how do I make one?" with no answer here —
+/// the File menu owns creation.
+fn groups_section(state: &State) -> Element<'_, Message> {
+    if state.groups.is_empty() {
+        return widget::column::with_capacity(0).into();
+    }
+
+    let mut section = widget::settings::section().title(fl!("in-groups"));
+    for (index, row) in state.groups.iter().enumerate() {
+        section = section.add(
+            widget::settings::item::builder(row.name.clone()).toggler(row.member, move |member| {
+                Message::GroupToggled(index, member)
+            }),
+        );
+    }
+    section.into()
 }
 
 /// The read-only list of properties the card carries that this editor will not

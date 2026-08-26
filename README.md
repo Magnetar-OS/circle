@@ -53,8 +53,13 @@ Reading, searching, creating, editing, and deleting contacts all work.
   and most CardDAV servers speak natively — with a settings toggle for 4.0.
   Existing contacts always keep the version their own bytes declare: edits
   patch in the card's dialect and never convert.
-- **Groups** appear in the sidebar, read from the cards' `CATEGORIES`; pick
-  one to filter the list, assign through the editor's categories field.
+- **Groups**, both ways vCards spell them. `CATEGORIES` values and
+  `KIND:group` cards (including Apple's `X-ADDRESSBOOKSERVER-KIND` form)
+  share one sidebar section; pick one to filter the list. Group cards can be
+  created and deleted from the File menu, and the editor toggles a contact's
+  membership per group. Membership edits rewrite only the group cards that
+  changed, in each card's own dialect — so a group written by an Apple
+  client keeps the spelling Apple clients read.
 - **Import and export**, as `.vcf` through the file portal. Import is UID-keyed
   so re-importing the same export updates rather than duplicates; export writes
   the stored bytes verbatim, so nothing is lost in either direction. Opening a
@@ -71,9 +76,8 @@ Reading, searching, creating, editing, and deleting contacts all work.
 - **Settings** persist through `cosmic-config`: which books are shown, which
   book new contacts go to, and whether to sort by first or last name.
 
-Not yet: `KIND:group` cards (the second grouping mechanism — waits on the
-substrate's per-server quirks table), CSV import, and KDE Connect
-click-to-call — see [03-circle.md](03-circle.md).
+Not yet: CSV import and KDE Connect click-to-call — see
+[03-circle.md](03-circle.md).
 
 ## Building
 

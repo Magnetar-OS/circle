@@ -10,7 +10,7 @@
 //! not display. A regression here is silent — the app looks right, and the loss
 //! only becomes visible on another device after the next sync.
 
-use circle::ui::editor::{Field, ListKind, Message, State};
+use circle::ui::editor::{Field, GroupRow, ListKind, Message, State};
 use cosmic_pim_core::model::{CalendarMeta, Contact, Rgb};
 use cosmic_pim_core::store::contacts::{ContactStore, write_contact_raw};
 
@@ -377,4 +377,92 @@ fn setting_and_removing_a_photo_preserves_the_rest_of_the_card() {
         back.raw
     );
     assert_eq!(back.emails.len(), 2);
+}
+
+/// Group membership, end to end through the editor's rows and the store: the
+/// change lands on the GROUP card in its own spelling, and only the changed
+/// group is touched.
+#[test]
+fn toggling_membership_patches_the_group_card_and_only_it() {
+    use cosmic_pim_core::vcard::{WriteVersion, member_uid, member_uri};
+
+    let mut fixture = fixture();
+    let friends = fixture
+        .store
+        .create_group("Friends", &fixture.book.id, WriteVersion::V3)
+        .unwrap();
+    let work = fixture
+        .store
+        .create_group("Work", &fixture.book.id, WriteVersion::V3)
+        .unwrap();
+    let work_before = fixture
+        .store
+        .contact(&fixture.book.id, &work.uid)
+        .unwrap()
+        .raw;
+
+    // The editor flow: rows built from the store, one toggled, save applies
+    // the diff (mirroring AppModel::save_editor's steps without the shell).
+    let contact = fixture.ada();
+    let mut editor = State::edit(contact.clone(), fixture.store.books()).with_groups(vec![
+        GroupRow {
+            uid: friends.uid.clone(),
+            name: "Friends".into(),
+            member: false,
+            was_member: false,
+        },
+        GroupRow {
+            uid: work.uid.clone(),
+            name: "Work".into(),
+            member: false,
+            was_member: false,
+        },
+    ]);
+    editor.update(Message::GroupToggled(0, true));
+    assert_eq!(editor.changed_groups().len(), 1, "only Friends changed");
+
+    let saved = editor.finish();
+    fixture.store.save(&saved).unwrap();
+    for row in editor.changed_groups() {
+        let group = fixture.store.contact(&fixture.book.id, &row.uid).unwrap();
+        let mut members = group.members.clone();
+        members.push(member_uri(&saved.uid));
+        fixture
+            .store
+            .set_group_members(&fixture.book.id, &row.uid, &members)
+            .unwrap();
+    }
+
+    // Membership landed, in the Apple spelling the 3.0 group card uses.
+    let friends_after = fixture
+        .store
+        .contact(&fixture.book.id, &friends.uid)
+        .unwrap();
+    assert!(
+        friends_after
+            .members
+            .iter()
+            .any(|uri| member_uid(uri) == Some(saved.uid.as_str())),
+        "{:?}",
+        friends_after.members
+    );
+    assert!(
+        friends_after.raw.contains("X-ADDRESSBOOKSERVER-MEMBER:"),
+        "a 3.0 group gained the wrong member spelling:\n{}",
+        friends_after.raw
+    );
+
+    // The untouched group's file did not change at all.
+    let work_after = fixture
+        .store
+        .contact(&fixture.book.id, &work.uid)
+        .unwrap()
+        .raw;
+    assert_eq!(work_before, work_after, "an unchanged group was rewritten");
+
+    // And the group cards stay out of the people list.
+    assert!(
+        fixture.store.contacts().iter().all(|c| !c.is_group),
+        "a group card leaked into the contact list"
+    );
 }

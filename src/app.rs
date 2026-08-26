@@ -56,9 +56,13 @@ enum NavEntry {
     All,
     Book(String),
     /// A `CATEGORIES` value — the vCard-native half of groups (03, tier 4).
-    /// `KIND:group` cards are the other half and wait on the per-server
-    /// quirks table in the substrate.
     Category(String),
+    /// A `KIND:group` / `X-ADDRESSBOOKSERVER-KIND:group` card — the other
+    /// half. Filtering resolves its member URIs against contact UIDs.
+    Group {
+        book: String,
+        uid: String,
+    },
 }
 
 /// Start-up options, from the command line or a D-Bus activation.
@@ -186,7 +190,19 @@ pub struct AppModel {
 
 #[derive(Clone, Debug)]
 enum Dialog {
-    ConfirmDelete { key: ContactKey, name: String },
+    ConfirmDelete {
+        key: ContactKey,
+        name: String,
+    },
+    /// Deleting a group card — separate from a contact delete because the
+    /// body must say what is and is not lost (members stay).
+    ConfirmDeleteGroup {
+        key: ContactKey,
+        name: String,
+    },
+    NewGroup {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -225,6 +241,10 @@ pub enum Message {
     DeleteRequested,
     DeleteConfirmed,
     DialogCancel,
+
+    NewGroupRequested,
+    NewGroupName(String),
+    NewGroupConfirmed,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -237,6 +257,7 @@ pub enum ContextPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     NewContact,
+    NewGroup,
     EditContact,
     Delete,
     Search,
@@ -253,6 +274,7 @@ impl menu::action::MenuAction for MenuAction {
     fn message(&self) -> Self::Message {
         match self {
             MenuAction::NewContact => Message::NewContact,
+            MenuAction::NewGroup => Message::NewGroupRequested,
             MenuAction::EditContact => Message::EditContact,
             MenuAction::Delete => Message::DeleteRequested,
             MenuAction::Search => Message::FocusSearch,
@@ -433,6 +455,7 @@ impl cosmic::Application for AppModel {
                 &self.key_binds,
                 vec![
                     menu::Item::Button(fl!("new-contact"), None, MenuAction::NewContact),
+                    menu::Item::Button(fl!("new-group"), None, MenuAction::NewGroup),
                     menu::Item::Divider,
                     menu::Item::Button(fl!("import"), None, MenuAction::Import),
                     menu::Item::Button(fl!("export"), None, MenuAction::Export),
@@ -507,9 +530,8 @@ impl cosmic::Application for AppModel {
     }
 
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
-        let Dialog::ConfirmDelete { name, .. } = self.dialog.as_ref()?;
-        Some(
-            widget::dialog()
+        Some(match self.dialog.as_ref()? {
+            Dialog::ConfirmDelete { name, .. } => widget::dialog()
                 .title(fl!("confirm-delete-title", name = name.clone()))
                 .body(fl!("confirm-delete-body"))
                 .primary_action(
@@ -519,7 +541,35 @@ impl cosmic::Application for AppModel {
                     widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                 )
                 .into(),
-        )
+            Dialog::ConfirmDeleteGroup { name, .. } => widget::dialog()
+                .title(fl!("confirm-delete-title", name = name.clone()))
+                .body(fl!("confirm-delete-group-body"))
+                .primary_action(
+                    widget::button::destructive(fl!("delete")).on_press(Message::DeleteConfirmed),
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                )
+                .into(),
+            Dialog::NewGroup { name } => {
+                let mut create = widget::button::suggested(fl!("create"));
+                if !name.trim().is_empty() {
+                    create = create.on_press(Message::NewGroupConfirmed);
+                }
+                widget::dialog()
+                    .title(fl!("new-group"))
+                    .control(
+                        widget::text_input(fl!("group-name"), name)
+                            .on_input(Message::NewGroupName)
+                            .on_submit(|_| Message::NewGroupConfirmed),
+                    )
+                    .primary_action(create)
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    )
+                    .into()
+            }
+        })
     }
 
     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
@@ -717,7 +767,11 @@ impl cosmic::Application for AppModel {
                     .or_else(|| store.default_book().map(|b| b.id.clone()));
 
                 match target {
-                    Some(book) => self.editor = Some(editor::State::create(&book, &books)),
+                    Some(book) => {
+                        let groups = self.group_rows(&book, None);
+                        self.editor =
+                            Some(editor::State::create(&book, &books).with_groups(groups));
+                    }
                     // Every book read-only, or none at all. Saying so is the
                     // whole job here — an editor that cannot save is a trap.
                     None => return self.toast(fl!("error-no-writable-book")),
@@ -748,7 +802,8 @@ impl cosmic::Application for AppModel {
                     return self.toast(fl!("read-only-book", name = name));
                 }
 
-                self.editor = Some(editor::State::edit(contact, &books));
+                let groups = self.group_rows(&contact.addressbook_id, Some(&contact.uid));
+                self.editor = Some(editor::State::edit(contact, &books).with_groups(groups));
             }
             Message::Editor(message) => {
                 // The one editor message the shell answers itself: the file
@@ -877,6 +932,21 @@ impl cosmic::Application for AppModel {
                 if self.editor.is_some() {
                     return Task::none();
                 }
+                // With a group active in the sidebar and nobody selected, the
+                // delete targets the group card. A selected person always wins
+                // — deleting a group because a row happened to be deselected
+                // would be a nasty surprise the confirm dialog cannot fix.
+                if self.selected.is_none()
+                    && let Some(NavEntry::Group { book, uid }) =
+                        self.nav.active_data::<NavEntry>().cloned()
+                    && let Some(group) = self.store.as_ref().and_then(|s| s.contact(&book, &uid))
+                {
+                    self.dialog = Some(Dialog::ConfirmDeleteGroup {
+                        key: ContactKey { book, uid },
+                        name: group.label(),
+                    });
+                    return Task::none();
+                }
                 if let Some(contact) = self.selected_contact() {
                     self.dialog = Some(Dialog::ConfirmDelete {
                         key: ContactKey::of(contact),
@@ -885,8 +955,10 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::DeleteConfirmed => {
-                let Some(Dialog::ConfirmDelete { key, name }) = self.dialog.take() else {
-                    return Task::none();
+                let (key, name, was_group) = match self.dialog.take() {
+                    Some(Dialog::ConfirmDelete { key, name }) => (key, name, false),
+                    Some(Dialog::ConfirmDeleteGroup { key, name }) => (key, name, true),
+                    _ => return Task::none(),
                 };
                 let Some(store) = self.store.as_mut() else {
                     return Task::none();
@@ -896,9 +968,43 @@ impl cosmic::Application for AppModel {
                 }
                 self.selected = None;
                 self.editor = None;
+                if was_group {
+                    self.rebuild_nav();
+                }
                 self.reload();
             }
             Message::DialogCancel => self.dialog = None,
+
+            Message::NewGroupRequested => {
+                self.dialog = Some(Dialog::NewGroup {
+                    name: String::new(),
+                });
+            }
+            Message::NewGroupName(name) => {
+                if let Some(Dialog::NewGroup { name: current }) = self.dialog.as_mut() {
+                    *current = name;
+                }
+            }
+            Message::NewGroupConfirmed => {
+                let Some(Dialog::NewGroup { name }) = self.dialog.take() else {
+                    return Task::none();
+                };
+                if name.trim().is_empty() {
+                    return Task::none();
+                }
+                let version = self.write_version();
+                let Some(store) = self.store.as_mut() else {
+                    return Task::none();
+                };
+                let Some(book) = store.default_book().map(|b| b.id.clone()) else {
+                    return self.toast(fl!("error-no-writable-book"));
+                };
+                if let Err(why) = store.create_group(name.trim(), &book, version) {
+                    return self.toast(why.to_string());
+                }
+                self.rebuild_nav();
+                self.reload();
+            }
         }
         Task::none()
     }
@@ -918,6 +1024,12 @@ impl AppModel {
             Some(NavEntry::Category(category)) => {
                 title.push_str(" — ");
                 title.push_str(category);
+            }
+            Some(NavEntry::Group { book, uid }) => {
+                if let Some(group) = self.store.as_ref().and_then(|s| s.contact(book, uid)) {
+                    title.push_str(" — ");
+                    title.push_str(&group.label());
+                }
             }
             _ => {}
         }
@@ -987,6 +1099,24 @@ impl AppModel {
                 .icon(widget::icon::from_name("folder-symbolic"));
         }
 
+        // Group cards, the other mechanism. Same section of the sidebar as
+        // the CATEGORIES groups — a user thinks "my groups", not "my two
+        // grouping mechanisms"; the distinction only matters to the code.
+        let groups = self.store.as_ref().map(|s| s.groups()).unwrap_or_default();
+        for group in groups
+            .iter()
+            .filter(|g| !self.config.is_hidden(&g.addressbook_id))
+        {
+            self.nav
+                .insert()
+                .text(group.label())
+                .data(NavEntry::Group {
+                    book: group.addressbook_id.clone(),
+                    uid: group.uid.clone(),
+                })
+                .icon(widget::icon::from_name("system-users-symbolic"));
+        }
+
         // Restore the previous filter if that book still exists, else fall back
         // to "All" rather than leaving nothing active — `active_data` returning
         // `None` would filter the list down to nothing at all.
@@ -1030,6 +1160,27 @@ impl AppModel {
                 _ => !self.config.is_hidden(&c.addressbook_id),
             })
             .collect();
+
+        if let Some(NavEntry::Group { book, uid }) = &filter {
+            // Member URIs resolve to UIDs where they can (`urn:uuid:…` and
+            // bare values); a `mailto:` member names an address, not a card,
+            // and cannot match a row.
+            let member_uids: std::collections::HashSet<String> = self
+                .store
+                .as_ref()
+                .and_then(|s| s.contact(book, uid))
+                .map(|group| {
+                    group
+                        .members
+                        .iter()
+                        .filter_map(|uri| {
+                            cosmic_pim_core::vcard::member_uid(uri).map(ToOwned::to_owned)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.contacts.retain(|c| member_uids.contains(&c.uid));
+        }
 
         if self.config.sort_by_given_name {
             self.contacts.sort_by_key(|c| {
@@ -1087,6 +1238,43 @@ impl AppModel {
         let books = self.writable_books();
         self.writable_ids = books.iter().map(|b| b.id.clone()).collect();
         self.writable_names = books.iter().map(|b| b.name.clone()).collect();
+    }
+
+    /// The membership rows for the editor: every group card in `book`, marked
+    /// with whether `uid` is currently a member.
+    fn group_rows(&self, book: &str, uid: Option<&str>) -> Vec<editor::GroupRow> {
+        use cosmic_pim_core::vcard::member_uid;
+
+        self.store
+            .as_ref()
+            .map(|store| {
+                store
+                    .groups()
+                    .into_iter()
+                    .filter(|g| g.addressbook_id == book)
+                    .map(|g| {
+                        let member = uid.is_some_and(|uid| {
+                            g.members.iter().any(|uri| member_uid(uri) == Some(uid))
+                        });
+                        editor::GroupRow {
+                            uid: g.uid,
+                            name: g.display_name,
+                            member,
+                            was_member: member,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The version new cards are written in, per settings.
+    fn write_version(&self) -> cosmic_pim_core::vcard::WriteVersion {
+        if self.config.prefer_vcard4 {
+            cosmic_pim_core::vcard::WriteVersion::V4
+        } else {
+            cosmic_pim_core::vcard::WriteVersion::V3
+        }
     }
 
     fn persist_config(&mut self) {
@@ -1157,11 +1345,9 @@ impl AppModel {
 
         let contact = state.finish();
         let photo_edit = state.photo.clone();
-        let version = if self.config.prefer_vcard4 {
-            cosmic_pim_core::vcard::WriteVersion::V4
-        } else {
-            cosmic_pim_core::vcard::WriteVersion::V3
-        };
+        let changed_groups: Vec<editor::GroupRow> =
+            state.changed_groups().into_iter().cloned().collect();
+        let version = self.write_version();
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
@@ -1191,9 +1377,18 @@ impl AppModel {
             return self.toast(fl!("error-photo", why = why));
         }
 
+        // Membership lives on the GROUP cards, so the changed rows patch those
+        // — only the changed ones, or every contact save would churn every
+        // group file and push them all to the server unchanged.
+        let membership_error = apply_group_changes(store, &contact, &changed_groups);
+
         self.editor = None;
         self.selected = Some(ContactKey::of(&contact));
+        self.rebuild_nav();
         self.reload();
+        if let Some(why) = membership_error {
+            return self.toast(why);
+        }
         Task::none()
     }
 
@@ -1340,6 +1535,41 @@ fn apply_photo_edit(
         .map(|c| c.file_name)
         .ok_or_else(|| fl!("error-load-contacts"))?;
     write_contact_raw(&meta, &file_name, &patched).map_err(|why| why.to_string())
+}
+
+/// Applies the editor's membership toggles by patching each changed group
+/// card. Returns the first error's message, applying the rest regardless —
+/// one unwritable group should not strand the other toggles.
+fn apply_group_changes(
+    store: &mut ContactStore,
+    contact: &Contact,
+    changed: &[editor::GroupRow],
+) -> Option<String> {
+    use cosmic_pim_core::vcard::{member_uid, member_uri};
+
+    let mut first_error = None;
+    for row in changed {
+        let Some(group) = store.contact(&contact.addressbook_id, &row.uid) else {
+            continue; // The group vanished underneath the editor; nothing to do.
+        };
+
+        let mut members = group.members.clone();
+        if row.member {
+            if !members
+                .iter()
+                .any(|uri| member_uid(uri) == Some(contact.uid.as_str()))
+            {
+                members.push(member_uri(&contact.uid));
+            }
+        } else {
+            members.retain(|uri| member_uid(uri) != Some(contact.uid.as_str()));
+        }
+
+        if let Err(why) = store.set_group_members(&contact.addressbook_id, &row.uid, &members) {
+            first_error.get_or_insert_with(|| why.to_string());
+        }
+    }
+    first_error
 }
 
 /// The MIME type an image file's extension implies. The photo bytes are

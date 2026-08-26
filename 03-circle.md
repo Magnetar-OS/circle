@@ -59,17 +59,25 @@ Open:
 - CSV import with an explicit column-mapping screen, no silent guessing.
 - Export in 3.0 — same substrate blocker as tier 1.
 
-### 4. Groups — CATEGORIES half DONE
+### 4. Groups — DONE except drag and compose-list
 
-Done: sidebar groups read live off the cards' `CATEGORIES` (a group with no
-members stops existing — nothing stored, nothing to migrate), filtering the
-list; assignment through the editor's categories field; the detail pane shows
-them as chips.
+Both mechanisms ship:
 
-Open: `KIND:group` / addressbook-group cards — the other mechanism, kept
-separate because servers disagree and this is a data-loss site. Waits on the
-per-server quirks table (01), which is now being built. Drag-to-assign and
-group-as-compose-list also open.
+- **CATEGORIES**: sidebar groups read live off the cards (a group with no
+  members stops existing), filtering the list; assignment through the
+  editor's categories field; chips in the detail pane.
+- **KIND:group cards**: parsed in both spellings (4.0 `KIND:group` and
+  Apple's `X-ADDRESSBOOKSERVER-KIND` on 3.0), listed in the same sidebar
+  section, filtering by member URI → UID resolution. Created from the File
+  menu (in the configured version's dialect), deleted with a confirm that
+  says the members stay, membership toggled per-group in the editor. The
+  data-loss site is closed in the substrate: `set_members` writes in the
+  card's own member spelling — RFC `MEMBER` never lands on an Apple-style
+  group, where Apple clients would not see it — and only *changed* groups
+  are rewritten on save, so unchanged group files never churn through sync.
+
+Open: drag-to-assign, group as compose-list (waits on Envelope), and
+per-server group quirks as field reports arrive (quirks ledger exists now).
 
 ### 5. Linking (the distinguishing model)
 

@@ -109,6 +109,13 @@ photo-removing = The photo is removed on save.
 error-photo = The photo could not be changed: { $why }
 
 groups = Groups
+new-group = New group
+group-name = Group name
+create = Create
+confirm-delete-group-body =
+    Only the group itself is deleted — the people in it stay in your address
+    book. If the book is synced, the deletion is pushed on the next sync.
+in-groups = In groups
 
 confirm-delete-title = Delete { $name }?
 confirm-delete-body =
