@@ -180,6 +180,21 @@ pub struct AppModel {
     /// Everything matching the current query and book filter, sorted.
     contacts: Vec<Contact>,
     selected: Option<ContactKey>,
+    /// Selection mode: rows toggle membership in `checked` instead of opening
+    /// the detail pane, and the action bar under the list operates on the set.
+    selecting: bool,
+    /// The rows ticked while `selecting`.
+    checked: std::collections::HashSet<ContactKey>,
+    /// The keyboard modifiers as of the last change — what turns a plain
+    /// click into Ctrl+click (toggle) or Shift+click (range).
+    modifiers: Modifiers,
+    /// Deleted cards whose undo toast is still up, newest last, capped so a
+    /// long session cannot hoard every card ever deleted.
+    undo: std::collections::BTreeMap<u64, Vec<DeletedCard>>,
+    undo_seq: u64,
+    /// The window's width, for the adaptive layout. Starts at the configured
+    /// launch width; `on_window_resize` keeps it true from then on.
+    width: f32,
     /// Decoded photos, one entry per contact that has one.
     ///
     /// Cached because `view` runs every frame and a PHOTO is hundreds of
@@ -204,6 +219,22 @@ pub struct AppModel {
     fatal: Option<String>,
 }
 
+/// Everything needed to put a deleted card back, byte for byte.
+#[derive(Clone, Debug)]
+struct DeletedCard {
+    book: String,
+    file_name: String,
+    raw: String,
+}
+
+/// Below this width the three panes collapse to one — list or detail, not
+/// both. Chosen so the collapsed layout arrives well before the 360 px the
+/// metainfo promises, with the panes still comfortable either side of it.
+const COLLAPSE_WIDTH: f32 = 640.0;
+
+/// The most undo toasts worth honouring at once; older deletions fall off.
+const UNDO_DEPTH: usize = 8;
+
 /// The in-progress "add an account" form on the Accounts page.
 #[derive(Clone, Debug, Default)]
 pub struct AccountForm {
@@ -216,9 +247,12 @@ pub struct AccountForm {
 
 #[derive(Clone, Debug)]
 enum Dialog {
-    ConfirmDelete {
-        key: ContactKey,
-        name: String,
+    /// Deleting several contacts at once — the one delete that still asks
+    /// first, because eight rows ticked over three books is easy to misread.
+    /// A single delete asks forgiveness instead: it happens immediately, with
+    /// an undo toast.
+    ConfirmDeleteMany {
+        keys: Vec<ContactKey>,
     },
     /// Deleting a group card — separate from a contact delete because the
     /// body must say what is and is not lost (members stay).
@@ -227,6 +261,10 @@ enum Dialog {
         name: String,
     },
     NewGroup {
+        name: String,
+    },
+    /// Adding every checked contact to a `CATEGORIES` group by name.
+    AddToGroup {
         name: String,
     },
 }
@@ -239,12 +277,19 @@ pub enum Message {
 
     QueryChanged(String),
     Select(ContactKey),
+    SelectFirst,
+    MoveSelection(isize),
+    Modifiers(Modifiers),
+    ToggleSelecting,
+    SelectAll,
+    BackToList,
     Copy(String),
     FilesChanged,
     Refresh,
     Key(Modifiers, Key, cosmic::iced::keyboard::key::Physical),
     FocusSearch,
     CloseToast(widget::ToastId),
+    UndoDelete(u64),
 
     ToggleBook(String),
     SortByGivenName(bool),
@@ -285,6 +330,12 @@ pub enum Message {
     DeleteConfirmed,
     DialogCancel,
 
+    ExportSelectedRequested,
+    ExportSelectedTo(PathBuf),
+    AddToGroupRequested,
+    AddToGroupName(String),
+    AddToGroupConfirmed,
+
     NewGroupRequested,
     NewGroupName(String),
     NewGroupConfirmed,
@@ -304,6 +355,7 @@ pub enum MenuAction {
     NewGroup,
     EditContact,
     Delete,
+    SelectAll,
     Search,
     Import,
     ImportCsv,
@@ -324,6 +376,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::NewGroup => Message::NewGroupRequested,
             MenuAction::EditContact => Message::EditContact,
             MenuAction::Delete => Message::DeleteRequested,
+            MenuAction::SelectAll => Message::SelectAll,
             MenuAction::Search => Message::FocusSearch,
             MenuAction::Import => Message::ImportRequested,
             MenuAction::ImportCsv => Message::ImportCsvRequested,
@@ -430,6 +483,12 @@ impl cosmic::Application for AppModel {
             writable_names: Vec::new(),
             contacts: Vec::new(),
             selected: None,
+            selecting: false,
+            checked: std::collections::HashSet::new(),
+            modifiers: Modifiers::default(),
+            undo: std::collections::BTreeMap::new(),
+            undo_seq: 0,
+            width: 1100.0,
             photos: HashMap::new(),
             query: String::new(),
             editor: None,
@@ -569,6 +628,7 @@ impl cosmic::Application for AppModel {
                         menu::Item::ButtonDisabled(fl!("delete-contact"), None, MenuAction::Delete)
                     },
                     menu::Item::Divider,
+                    menu::Item::Button(fl!("select-all"), None, MenuAction::SelectAll),
                     menu::Item::Button(fl!("search-contacts"), None, MenuAction::Search),
                 ],
             ),
@@ -609,6 +669,13 @@ impl cosmic::Application for AppModel {
             self.csv = None;
         } else if self.editor.is_some() {
             self.editor = None;
+        } else if self.selecting {
+            self.selecting = false;
+            self.checked.clear();
+        } else if self.is_collapsed() && self.selected.is_some() {
+            // In the one-pane layout Escape is "back": detail returns to the
+            // list before the query is touched.
+            self.selected = None;
         } else if !self.query.is_empty() {
             self.query.clear();
             self.reload();
@@ -616,10 +683,14 @@ impl cosmic::Application for AppModel {
         Task::none()
     }
 
+    fn on_window_resize(&mut self, _id: cosmic::iced::window::Id, width: f32, _height: f32) {
+        self.width = width;
+    }
+
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
         Some(match self.dialog.as_ref()? {
-            Dialog::ConfirmDelete { name, .. } => widget::dialog()
-                .title(fl!("confirm-delete-title", name = name.clone()))
+            Dialog::ConfirmDeleteMany { keys } => widget::dialog()
+                .title(fl!("confirm-delete-many-title", count = keys.len()))
                 .body(fl!("confirm-delete-body"))
                 .primary_action(
                     widget::button::destructive(fl!("delete")).on_press(Message::DeleteConfirmed),
@@ -651,6 +722,25 @@ impl cosmic::Application for AppModel {
                             .on_submit(|_| Message::NewGroupConfirmed),
                     )
                     .primary_action(create)
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    )
+                    .into()
+            }
+            Dialog::AddToGroup { name } => {
+                let mut add = widget::button::suggested(fl!("add"));
+                if !name.trim().is_empty() {
+                    add = add.on_press(Message::AddToGroupConfirmed);
+                }
+                widget::dialog()
+                    .title(fl!("add-to-group-title", count = self.checked.len()))
+                    .body(fl!("add-to-group-body"))
+                    .control(
+                        widget::text_input(fl!("group-name"), name)
+                            .on_input(Message::AddToGroupName)
+                            .on_submit(|_| Message::AddToGroupConfirmed),
+                    )
+                    .primary_action(add)
                     .secondary_action(
                         widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                     )
@@ -697,48 +787,108 @@ impl cosmic::Application for AppModel {
                 .into();
         }
 
-        let list = widget::column::with_capacity(2)
+        let collapsed = self.is_collapsed();
+
+        let select_toggle = widget::tooltip(
+            widget::button::icon(widget::icon::from_name("object-select-symbolic"))
+                .class(if self.selecting {
+                    cosmic::theme::Button::Suggested
+                } else {
+                    cosmic::theme::Button::Icon
+                })
+                .on_press(Message::ToggleSelecting),
+            widget::text::body(fl!("select")),
+            widget::tooltip::Position::Bottom,
+        );
+
+        let mut list_pane = widget::column::with_capacity(3)
             .spacing(spacing.space_xs)
             .padding(spacing.space_xs)
             .push(
-                widget::search_input(fl!("search-contacts"), &self.query)
-                    .id(search_id())
-                    .on_input(Message::QueryChanged)
-                    .on_clear(Message::QueryChanged(String::new())),
+                widget::row::with_capacity(2)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .spacing(spacing.space_xxs)
+                    .push(
+                        widget::search_input(fl!("search-contacts"), &self.query)
+                            .id(search_id())
+                            .on_input(Message::QueryChanged)
+                            .on_clear(Message::QueryChanged(String::new()))
+                            // Enter lands on the first match, so
+                            // type-then-Enter reaches a person with no mouse.
+                            .on_submit(|_| Message::SelectFirst),
+                    )
+                    .push(select_toggle),
             )
             .push(crate::ui::list::list(
                 &self.contacts,
                 self.selected.as_ref(),
                 &self.query,
                 &self.photos,
-            ))
-            .width(Length::Fixed(320.0));
+                self.selecting,
+                &self.checked,
+            ));
+        if self.selecting {
+            list_pane = list_pane.push(self.action_bar());
+        }
 
-        let right: Element<'_, Message> = match (&self.csv, &self.editor) {
-            (Some(state), _) => self.csv_pane(state),
-            (None, Some(state)) => self.editor_pane(state),
-            (None, None) => match self.selected_contact() {
-                Some(contact) => crate::ui::list::detail(
-                    contact,
-                    self.store
-                        .as_ref()
-                        .and_then(|s| s.book(&contact.addressbook_id))
-                        .map(|b| b.name.as_str()),
-                    self.photos.get(&ContactKey::of(contact)),
-                ),
+        let detail_or_placeholder = |show_back: bool| -> Element<'_, Message> {
+            match self.selected_contact() {
+                Some(contact) => {
+                    let detail = crate::ui::list::detail(
+                        contact,
+                        self.store
+                            .as_ref()
+                            .and_then(|s| s.book(&contact.addressbook_id))
+                            .map(|b| b.name.as_str()),
+                        self.photos.get(&ContactKey::of(contact)),
+                    );
+                    if show_back {
+                        widget::column::with_capacity(2)
+                            .push(
+                                widget::button::icon(widget::icon::from_name(
+                                    "go-previous-symbolic",
+                                ))
+                                .on_press(Message::BackToList)
+                                .apply(widget::container)
+                                .padding(spacing.space_xxs),
+                            )
+                            .push(detail)
+                            .into()
+                    } else {
+                        detail
+                    }
+                }
                 None => widget::container(
                     widget::text::body(fl!("no-selection"))
                         .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
                 )
                 .padding(spacing.space_m)
                 .into(),
-            },
+            }
         };
 
-        let content = widget::row::with_capacity(3)
-            .push(list)
-            .push(widget::divider::vertical::default())
-            .push(widget::container(right).width(Length::Fill));
+        // One pane or three. Collapsed, the editor and the CSV mapper win the
+        // window outright (they carry their own cancel), then a selected
+        // contact's detail with a back button, then the list.
+        let content: Element<'_, Message> = if collapsed {
+            match (&self.csv, &self.editor) {
+                (Some(state), _) => self.csv_pane(state),
+                (None, Some(state)) => self.editor_pane(state),
+                (None, None) if self.selected_contact().is_some() => detail_or_placeholder(true),
+                (None, None) => list_pane.width(Length::Fill).into(),
+            }
+        } else {
+            let right: Element<'_, Message> = match (&self.csv, &self.editor) {
+                (Some(state), _) => self.csv_pane(state),
+                (None, Some(state)) => self.editor_pane(state),
+                (None, None) => detail_or_placeholder(false),
+            };
+            widget::row::with_capacity(3)
+                .push(list_pane.width(Length::Fixed(320.0)))
+                .push(widget::divider::vertical::default())
+                .push(widget::container(right).width(Length::Fill))
+                .into()
+        };
 
         // The toaster overlays transient errors without stealing focus, which
         // is what a failed save needs: the editor is still open behind it and
@@ -760,7 +910,9 @@ impl cosmic::Application for AppModel {
             // Only `Ignored` presses: a focused text input has already claimed
             // anything it wants, so the editor keeps its own keys. The physical
             // key travels too — it is what lets Ctrl+N fire on a Greek or
-            // Cyrillic layout, where the logical key is not "n".
+            // Cyrillic layout, where the logical key is not "n". Modifier
+            // changes travel regardless of status: what turns a click into
+            // Ctrl+click must be current even while a widget has focus.
             cosmic::iced::event::listen_with(|event, status, _window| match (event, status) {
                 (
                     cosmic::iced::Event::Keyboard(cosmic::iced::keyboard::Event::KeyPressed {
@@ -771,6 +923,12 @@ impl cosmic::Application for AppModel {
                     }),
                     cosmic::iced::event::Status::Ignored,
                 ) => Some(Message::Key(modifiers, key, physical_key)),
+                (
+                    cosmic::iced::Event::Keyboard(cosmic::iced::keyboard::Event::ModifiersChanged(
+                        modifiers,
+                    )),
+                    _,
+                ) => Some(Message::Modifiers(modifiers)),
                 _ => None,
             }),
         ];
@@ -814,8 +972,62 @@ impl cosmic::Application for AppModel {
                 self.reload();
             }
             Message::Select(key) => {
-                self.selected = Some(key);
+                if self.selecting || self.modifiers.control() {
+                    self.selecting = true;
+                    if self.modifiers.shift() {
+                        self.check_range_to(&key);
+                    } else if !self.checked.insert(key.clone()) {
+                        // Already ticked: a second click unticks.
+                        self.checked.remove(&key);
+                    }
+                } else if self.modifiers.shift() && self.selected.is_some() {
+                    self.selecting = true;
+                    self.check_range_to(&key);
+                } else {
+                    self.selected = Some(key);
+                }
             }
+            Message::SelectFirst => {
+                if let Some(first) = self.contacts.first() {
+                    self.selected = Some(ContactKey::of(first));
+                }
+            }
+            Message::MoveSelection(delta) => {
+                if self.editor.is_some()
+                    || self.csv.is_some()
+                    || self.dialog.is_some()
+                    || self.contacts.is_empty()
+                {
+                    return Task::none();
+                }
+                let position = self
+                    .selected
+                    .as_ref()
+                    .and_then(|key| self.contacts.iter().position(|c| key.matches(c)));
+                let next = match position {
+                    Some(index) => index
+                        .saturating_add_signed(delta)
+                        .min(self.contacts.len() - 1),
+                    // Nothing selected yet: Down starts at the top, Up at the
+                    // bottom, which is where each key is headed anyway.
+                    None if delta >= 0 => 0,
+                    None => self.contacts.len() - 1,
+                };
+                self.selected = Some(ContactKey::of(&self.contacts[next]));
+            }
+            Message::Modifiers(modifiers) => self.modifiers = modifiers,
+            Message::ToggleSelecting => {
+                self.selecting = !self.selecting;
+                if !self.selecting {
+                    self.checked.clear();
+                }
+            }
+            Message::SelectAll => {
+                self.selecting = true;
+                self.checked = self.contacts.iter().map(ContactKey::of).collect();
+            }
+            Message::BackToList => self.selected = None,
+            Message::UndoDelete(token) => return self.undo_delete(token),
             Message::Copy(value) => return cosmic::iced::clipboard::write(value),
             // A burst of filesystem changes and an explicit refresh do the same
             // work; they are separate messages only so the logs distinguish
@@ -831,6 +1043,19 @@ impl cosmic::Application for AppModel {
                 self.reload();
             }
             Message::Key(modifiers, key, physical) => {
+                // Unmodified arrows walk the list. Safe without a modifier —
+                // unlike letters, an arrow in a focused text field never
+                // reaches here (the widget claims it), so this only fires
+                // when nothing is being typed.
+                if modifiers.is_empty() {
+                    use cosmic::iced::keyboard::key::Named;
+                    if matches!(&key, Key::Named(Named::ArrowDown)) {
+                        return self.update(Message::MoveSelection(1));
+                    }
+                    if matches!(&key, Key::Named(Named::ArrowUp)) {
+                        return self.update(Message::MoveSelection(-1));
+                    }
+                }
                 for (bind, action) in &self.key_binds {
                     if bind.matches(modifiers, &key, Some(&physical)) {
                         return self.update(action.message());
@@ -1119,6 +1344,69 @@ impl cosmic::Application for AppModel {
             Message::DialogCancelled => {}
             Message::DialogFailed(why) => return self.toast(why),
 
+            Message::ExportSelectedRequested => {
+                if self.checked.is_empty() {
+                    return Task::none();
+                }
+                return cosmic::task::future(async move {
+                    use cosmic::dialog::file_chooser::{self, FileFilter};
+
+                    let dialog = file_chooser::save::Dialog::new()
+                        .title(fl!("export"))
+                        .file_name(format!("{}.vcf", fl!("app-title")))
+                        .filter(FileFilter::new("vCard").glob("*.vcf"));
+
+                    match dialog.save_file().await {
+                        Ok(response) => match response.url().and_then(|u| u.to_file_path().ok()) {
+                            Some(path) => Message::ExportSelectedTo(path),
+                            None => Message::DialogFailed(fl!("error-remote-file")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                        Err(why) => Message::DialogFailed(why.to_string()),
+                    }
+                });
+            }
+            Message::ExportSelectedTo(path) => {
+                // In the list's current order, not the set's arbitrary one, so
+                // the file reads the way the window did.
+                let mut text = String::new();
+                for contact in self
+                    .contacts
+                    .iter()
+                    .filter(|c| self.checked.contains(&ContactKey::of(c)))
+                {
+                    if contact.raw.trim().is_empty() {
+                        text.push_str(&cosmic_pim_core::vcard::to_vcard_versioned(
+                            contact,
+                            cosmic_pim_core::vcard::WriteVersion::default(),
+                        ));
+                    } else {
+                        text.push_str(&contact.raw);
+                        if !contact.raw.ends_with('\n') {
+                            text.push_str("\r\n");
+                        }
+                    }
+                }
+                match std::fs::write(&path, text) {
+                    Ok(()) => return self.toast(fl!("export-done", path = file_label(&path))),
+                    Err(why) => return self.toast(format!("{}: {why}", file_label(&path))),
+                }
+            }
+
+            Message::AddToGroupRequested => {
+                if !self.checked.is_empty() {
+                    self.dialog = Some(Dialog::AddToGroup {
+                        name: String::new(),
+                    });
+                }
+            }
+            Message::AddToGroupName(name) => {
+                if let Some(Dialog::AddToGroup { name: current }) = self.dialog.as_mut() {
+                    *current = name;
+                }
+            }
+            Message::AddToGroupConfirmed => return self.add_checked_to_group(),
+
             Message::DeleteRequested => {
                 if self.editor.is_some() {
                     return Task::none();
@@ -1138,40 +1426,46 @@ impl cosmic::Application for AppModel {
                     });
                     return Task::none();
                 }
-                if let Some(contact) = self.selected_contact() {
-                    self.dialog = Some(Dialog::ConfirmDelete {
-                        key: ContactKey::of(contact),
-                        name: contact.label(),
+                // Several rows ticked: confirm once for the lot. Eight rows
+                // over three books is easy to misread, so this is the one
+                // delete that still asks first.
+                if self.selecting && !self.checked.is_empty() {
+                    self.dialog = Some(Dialog::ConfirmDeleteMany {
+                        keys: self.checked.iter().cloned().collect(),
                     });
-                }
-            }
-            Message::DeleteConfirmed => {
-                let (key, name, was_group) = match self.dialog.take() {
-                    Some(Dialog::ConfirmDelete { key, name }) => (key, name, false),
-                    Some(Dialog::ConfirmDeleteGroup { key, name }) => (key, name, true),
-                    _ => return Task::none(),
-                };
-                let Some(store) = self.store.as_mut() else {
                     return Task::none();
-                };
-                // The server-side coordinates live in the sidecar, which
-                // survives the local delete — but the file name has to be
-                // taken while the card still exists.
-                let file_name = store.contact(&key.book, &key.uid).map(|c| c.file_name);
-                if let Err(why) = store.delete(&key.book, &key.uid) {
-                    return self.toast(fl!("error-delete", name = name, why = why.to_string()));
                 }
-                if let Some(file_name) = file_name {
-                    queue_removal(store, &key.book, &file_name);
+                // A single contact deletes immediately, with an undo toast —
+                // asking forgiveness beats asking permission when forgiveness
+                // is one click and permission is a dialog every time.
+                if let Some(contact) = self.selected_contact() {
+                    let key = ContactKey::of(contact);
+                    return self.delete_with_undo(vec![key]);
                 }
-                self.photos.remove(&key);
-                self.selected = None;
-                self.editor = None;
-                if was_group {
-                    self.rebuild_nav();
-                }
-                self.reload();
             }
+            Message::DeleteConfirmed => match self.dialog.take() {
+                Some(Dialog::ConfirmDeleteMany { keys }) => return self.delete_with_undo(keys),
+                Some(Dialog::ConfirmDeleteGroup { key, name }) => {
+                    let Some(store) = self.store.as_mut() else {
+                        return Task::none();
+                    };
+                    // The server-side coordinates live in the sidecar, which
+                    // survives the local delete — but the file name has to be
+                    // taken while the card still exists.
+                    let file_name = store.contact(&key.book, &key.uid).map(|c| c.file_name);
+                    if let Err(why) = store.delete(&key.book, &key.uid) {
+                        return self.toast(fl!("error-delete", name = name, why = why.to_string()));
+                    }
+                    if let Some(file_name) = file_name {
+                        queue_removal(store, &key.book, &file_name);
+                    }
+                    self.selected = None;
+                    self.editor = None;
+                    self.rebuild_nav();
+                    self.reload();
+                }
+                _ => return Task::none(),
+            },
             Message::DialogCancel => self.dialog = None,
 
             Message::NewGroupRequested => {
@@ -1427,6 +1721,210 @@ impl AppModel {
     fn selected_contact(&self) -> Option<&Contact> {
         let key = self.selected.as_ref()?;
         self.contacts.iter().find(|c| key.matches(c))
+    }
+
+    /// Whether the window is too narrow for panes side by side.
+    fn is_collapsed(&self) -> bool {
+        self.width < COLLAPSE_WIDTH
+    }
+
+    /// Ticks every row between the selection anchor and `key`, inclusive, in
+    /// the list's current order — what Shift+click means everywhere else.
+    fn check_range_to(&mut self, key: &ContactKey) {
+        let position = |k: &ContactKey| self.contacts.iter().position(|c| k.matches(c));
+        let (Some(anchor), Some(target)) =
+            (self.selected.as_ref().and_then(&position), position(key))
+        else {
+            self.checked.insert(key.clone());
+            return;
+        };
+        let (from, to) = (anchor.min(target), anchor.max(target));
+        for contact in &self.contacts[from..=to] {
+            self.checked.insert(ContactKey::of(contact));
+        }
+    }
+
+    /// Deletes the given contacts immediately and offers one undo toast for
+    /// the lot. The cards' bytes are kept until the toast dies, so undo is a
+    /// byte-for-byte restore, not a reconstruction.
+    fn delete_with_undo(&mut self, keys: Vec<ContactKey>) -> Task<Message> {
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        let mut removed = Vec::new();
+        let mut label = String::new();
+        let mut first_error: Option<String> = None;
+        for key in &keys {
+            let Some(contact) = store.contact(&key.book, &key.uid) else {
+                continue;
+            };
+            if let Err(why) = store.delete(&key.book, &key.uid) {
+                first_error.get_or_insert_with(|| {
+                    fl!(
+                        "error-delete",
+                        name = contact.label(),
+                        why = why.to_string()
+                    )
+                });
+                continue;
+            }
+            queue_removal(store, &key.book, &contact.file_name);
+            self.photos.remove(key);
+            label = contact.label();
+            removed.push(DeletedCard {
+                book: key.book.clone(),
+                file_name: contact.file_name,
+                raw: contact.raw,
+            });
+        }
+
+        self.selected = None;
+        self.selecting = false;
+        self.checked.clear();
+        self.rebuild_nav();
+        self.reload();
+
+        if let Some(why) = first_error {
+            return self.toast(why);
+        }
+        if removed.is_empty() {
+            return Task::none();
+        }
+
+        let message = if removed.len() == 1 {
+            fl!("deleted-one", name = label)
+        } else {
+            fl!("deleted-many", count = removed.len())
+        };
+        self.undo_seq += 1;
+        let token = self.undo_seq;
+        self.undo.insert(token, removed);
+        while self.undo.len() > UNDO_DEPTH {
+            let oldest = *self.undo.keys().next().unwrap_or(&token);
+            self.undo.remove(&oldest);
+        }
+        self.toasts
+            .push(
+                widget::Toast::new(message)
+                    .action(fl!("undo"), move |_| Message::UndoDelete(token)),
+            )
+            .map(Into::into)
+    }
+
+    /// Puts a deletion's cards back, byte for byte, and re-queues them for
+    /// upload — the mirror image of [`Self::delete_with_undo`].
+    fn undo_delete(&mut self, token: u64) -> Task<Message> {
+        let Some(cards) = self.undo.remove(&token) else {
+            return Task::none();
+        };
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        let mut first_error = None;
+        for card in cards {
+            let Some(meta) = store.book(&card.book).cloned() else {
+                first_error.get_or_insert_with(|| fl!("error-load-contacts"));
+                continue;
+            };
+            match cosmic_pim_core::store::contacts::write_contact_raw(
+                &meta,
+                &card.file_name,
+                &card.raw,
+            ) {
+                Ok(()) => queue_push(store, &card.book, &card.file_name),
+                Err(why) => {
+                    first_error.get_or_insert_with(|| why.to_string());
+                }
+            }
+        }
+
+        self.rebuild_nav();
+        self.reload();
+        if let Some(why) = first_error {
+            return self.toast(why);
+        }
+        Task::none()
+    }
+
+    /// Adds every checked contact to the named `CATEGORIES` group — the
+    /// bulk twin of the editor's categories field.
+    fn add_checked_to_group(&mut self) -> Task<Message> {
+        let Some(Dialog::AddToGroup { name }) = self.dialog.take() else {
+            return Task::none();
+        };
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Task::none();
+        }
+        let version = self.write_version();
+        let keys: Vec<ContactKey> = self.checked.iter().cloned().collect();
+        let Some(store) = self.store.as_mut() else {
+            return Task::none();
+        };
+
+        let mut joined = 0usize;
+        let mut first_error: Option<String> = None;
+        for key in keys {
+            let Some(mut contact) = store.contact(&key.book, &key.uid) else {
+                continue;
+            };
+            if contact.categories.iter().any(|c| c == &name) {
+                continue;
+            }
+            contact.categories.push(name.clone());
+            match store.save_as(&contact, version) {
+                Ok(()) => {
+                    queue_push(store, &key.book, &contact.file_name);
+                    joined += 1;
+                }
+                Err(why) => {
+                    first_error.get_or_insert_with(|| {
+                        fl!("error-save", name = contact.label(), why = why.to_string())
+                    });
+                }
+            }
+        }
+
+        self.selecting = false;
+        self.checked.clear();
+        self.rebuild_nav();
+        self.reload();
+        if let Some(why) = first_error {
+            return self.toast(why);
+        }
+        self.toast(fl!(
+            "added-to-group",
+            count = joined.to_string(),
+            name = name
+        ))
+    }
+
+    /// The bar under the list while selecting: the count and what can be done
+    /// with the set.
+    fn action_bar(&self) -> Element<'_, Message> {
+        let spacing = cosmic::theme::spacing();
+        let count = self.checked.len();
+
+        let mut group = widget::button::standard(fl!("add-to-group"));
+        let mut export = widget::button::standard(fl!("export"));
+        let mut delete = widget::button::destructive(fl!("delete"));
+        if count > 0 {
+            group = group.on_press(Message::AddToGroupRequested);
+            export = export.on_press(Message::ExportSelectedRequested);
+            delete = delete.on_press(Message::DeleteRequested);
+        }
+
+        widget::column::with_capacity(2)
+            .spacing(spacing.space_xxs)
+            .push(widget::text::caption(fl!("selected-count", count = count)))
+            .push(
+                widget::flex_row(vec![group.into(), export.into(), delete.into()])
+                    .spacing(spacing.space_xxs)
+                    .row_spacing(spacing.space_xxs),
+            )
+            .into()
     }
 
     fn writable_books(&self) -> Vec<CalendarMeta> {

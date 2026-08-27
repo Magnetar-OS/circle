@@ -211,3 +211,24 @@ error-no-account-store = Account storage is unavailable, so accounts cannot be s
 error-url-scheme = The server address must start with https://
 error-url-insecure = Refusing to send your password over an unencrypted connection. Use https://
 sync = Sync
+
+## Selection and bulk actions
+
+select = Select
+select-all = Select all
+selected-count = { $count ->
+        [one] { $count } selected
+       *[other] { $count } selected
+    }
+add-to-group = Add to group…
+add-to-group-title = Add { $count ->
+        [one] one contact
+       *[other] { $count } contacts
+    } to a group
+add-to-group-body =
+    They join the group with this name — an existing name adds to that group,
+    a new one creates it in the sidebar.
+added-to-group = Added { $count } to { $name }.
+confirm-delete-many-title = Delete { $count } contacts?
+deleted-one = Deleted { $name }.
+deleted-many = Deleted { $count } contacts.

@@ -54,8 +54,11 @@ pub fn run() -> cosmic::iced::Result {
     let settings = cosmic::app::Settings::default()
         .size(cosmic::iced::Size::new(1100.0, 760.0))
         .size_limits(
+            // 360 wide is what the metainfo's `display_length` promises, and
+            // the layout collapses to one pane long before that — see
+            // `AppModel::layout`.
             cosmic::iced::Limits::NONE
-                .min_width(720.0)
+                .min_width(360.0)
                 .min_height(480.0),
         );
 

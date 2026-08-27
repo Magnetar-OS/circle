@@ -17,6 +17,8 @@ pub fn list<'a>(
     selected: Option<&'a ContactKey>,
     query: &str,
     photos: &'a std::collections::HashMap<ContactKey, widget::image::Handle>,
+    selecting: bool,
+    checked: &std::collections::HashSet<ContactKey>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -35,9 +37,11 @@ pub fn list<'a>(
 
     let mut column = widget::column::with_capacity(contacts.len()).spacing(spacing.space_xxxs);
     for contact in contacts {
+        let key = ContactKey::of(contact);
         let is_selected = selected.is_some_and(|key| key.matches(contact));
-        let photo = photos.get(&ContactKey::of(contact));
-        column = column.push(row(contact, is_selected, photo));
+        let photo = photos.get(&key);
+        let check = selecting.then_some(checked.contains(&key));
+        column = column.push(row(contact, is_selected, photo, check));
     }
 
     widget::scrollable(column.padding(spacing.space_xxs))
@@ -49,6 +53,8 @@ fn row<'a>(
     contact: &'a Contact,
     selected: bool,
     photo: Option<&widget::image::Handle>,
+    // `None` outside selection mode; `Some(ticked)` inside it.
+    check: Option<bool>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -75,10 +81,20 @@ fn row<'a>(
         );
     }
 
+    let mut content = widget::row::with_capacity(3)
+        .align_y(Alignment::Center)
+        .spacing(spacing.space_xs);
+    if let Some(ticked) = check {
+        content = content.push(widget::icon::from_name(if ticked {
+            "checkbox-checked-symbolic"
+        } else {
+            "checkbox-symbolic"
+        }));
+    }
+    let ticked = check == Some(true);
+
     widget::button::custom(
-        widget::row::with_capacity(2)
-            .align_y(Alignment::Center)
-            .spacing(spacing.space_xs)
+        content
             .push(crate::ui::avatar::avatar(
                 photo,
                 &contact.label(),
@@ -87,7 +103,7 @@ fn row<'a>(
             .push(text)
             .width(Length::Fill),
     )
-    .class(if selected {
+    .class(if ticked || (selected && check.is_none()) {
         cosmic::theme::Button::Suggested
     } else {
         cosmic::theme::Button::Text

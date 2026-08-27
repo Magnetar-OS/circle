@@ -46,6 +46,7 @@ pub fn key_binds() -> HashMap<KeyBind, MenuAction> {
 
     bind!([Ctrl], Key::Character("n".into()), NewContact);
     bind!([Ctrl], Key::Character("e".into()), EditContact);
+    bind!([Ctrl], Key::Character("a".into()), SelectAll);
     bind!([Ctrl], Key::Character("f".into()), Search);
     bind!([Ctrl], Key::Character("i".into()), Import);
     bind!([Ctrl, Shift], Key::Character("e".into()), Export);

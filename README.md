@@ -43,7 +43,14 @@ Reading, searching, creating, editing, and deleting contacts all work.
   birthday, nicknames, websites, categories, and notes, with `TYPE` labels and
   one preferred (`PREF`) entry per list. Edits patch the stored card rather than
   rebuilding it; see [Editing](#editing).
-- **Creating and deleting**, with a confirmation dialog before a delete.
+- **Creating and deleting.** A single delete happens immediately with an Undo
+  toast — the card comes back byte for byte; deleting several at once asks
+  first.
+- **Selection mode** — tick rows (Select button, Ctrl+click, Shift+click for
+  a range, Ctrl+A for all) and delete, export, or add the set to a group in
+  one action.
+- **An adaptive layout.** Three panes on a wide window; below 640 px the list
+  and detail take turns, down to 360 px.
 - **Photos and avatars.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and
   the 4.0 `data:` forms) is decoded and shown in the list and beside the name;
   a contact without a photo gets generated initials on a colour seeded from

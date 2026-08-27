@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Selection mode: the Select button beside the search field (or Ctrl+click,
+  Shift+click for a range, Ctrl+A for everything) ticks rows, and the bar
+  under the list deletes, exports, or adds the set to a group in one go.
+- Deleting a single contact no longer interrupts with a dialog — it happens
+  immediately, with an Undo toast that restores the card byte for byte.
+  Deleting several at once still confirms first.
+- An adaptive layout: below 640 px the panes collapse to one — list, or
+  detail with a back button — and the window now shrinks to the 360 px the
+  metainfo always claimed.
+- Keyboard travel: ↑/↓ move through the list, Enter in the search field jumps
+  to the first match, and Select all is Ctrl+A.
+
 - CardDAV accounts and sync, in the app. The Accounts page (View → Accounts)
   lists the suite's shared accounts, adds one from a server address, a
   username, and a password, and syncs on demand; File → Sync now runs a pass
