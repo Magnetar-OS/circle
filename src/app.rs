@@ -2181,4 +2181,48 @@ mod tests {
         assert_eq!(key.book, "personal");
         assert_eq!(key.uid, "abc");
     }
+
+    /// A PNG of the given size, for the photo-processing tests.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(width, height));
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn a_landscape_photo_is_cropped_square_and_scaled_down() {
+        let (data, mime) = process_photo(png(2000, 1000), "image/png");
+        assert_eq!(mime, "image/jpeg");
+        let img = image::load_from_memory(&data).unwrap();
+        assert_eq!((img.width(), img.height()), (PHOTO_SIDE, PHOTO_SIDE));
+    }
+
+    #[test]
+    fn a_small_portrait_photo_is_cropped_but_not_scaled_up() {
+        let (data, _) = process_photo(png(60, 100), "image/png");
+        let img = image::load_from_memory(&data).unwrap();
+        assert_eq!((img.width(), img.height()), (60, 60));
+    }
+
+    /// Re-setting a photo that already fits must not degrade it: the bytes
+    /// pass through untouched, generation loss zero.
+    #[test]
+    fn a_square_small_photo_passes_through_verbatim() {
+        let original = png(200, 200);
+        let (data, mime) = process_photo(original.clone(), "image/png");
+        assert_eq!(data, original);
+        assert_eq!(mime, "image/png");
+    }
+
+    /// Undecodable bytes are stored as chosen — refusing the photo outright
+    /// would be worse than embedding something another client may understand.
+    #[test]
+    fn undecodable_bytes_pass_through_verbatim() {
+        let noise = vec![0xAB; 64];
+        let (data, mime) = process_photo(noise.clone(), "image/jpeg");
+        assert_eq!(data, noise);
+        assert_eq!(mime, "image/jpeg");
+    }
 }
