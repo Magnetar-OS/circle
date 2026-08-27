@@ -44,11 +44,18 @@ Reading, searching, creating, editing, and deleting contacts all work.
   one preferred (`PREF`) entry per list. Edits patch the stored card rather than
   rebuilding it; see [Editing](#editing).
 - **Creating and deleting**, with a confirmation dialog before a delete.
-- **Photos.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and the 4.0
-  `data:` forms) is decoded and shown beside the name, and the editor can set,
-  replace, or remove the photo — patched into the card in its own dialect.
-  Remote photo URIs are deliberately never fetched — no network for avatars,
-  by design.
+- **Photos and avatars.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and
+  the 4.0 `data:` forms) is decoded and shown in the list and beside the name;
+  a contact without a photo gets generated initials on a colour seeded from
+  their name. The editor can set, replace, or remove the photo — a chosen
+  image is center-cropped square and scaled to 512 px, then patched into the
+  card in its own dialect. Remote photo URIs are deliberately never fetched —
+  no network for avatars, by design.
+- **Accounts and sync.** The Accounts page lists the suite's shared CardDAV
+  accounts, adds one from a URL, username, and password, and syncs on demand
+  or on a background cadence (off by default). Local edits, deletes, imports,
+  and group changes are queued for upload to the server their book is bound
+  to; a book with no binding stays local and queues nothing.
 - **Version policy.** New contacts are written as vCard 3.0 — what Nextcloud
   and most CardDAV servers speak natively — with a settings toggle for 4.0.
   Existing contacts always keep the version their own bytes declare: edits

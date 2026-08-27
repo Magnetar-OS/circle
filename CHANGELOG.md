@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- CardDAV accounts and sync, in the app. The Accounts page (View → Accounts)
+  lists the suite's shared accounts, adds one from a server address, a
+  username, and a password, and syncs on demand; File → Sync now runs a pass
+  too, and an optional background cadence (off by default) lives in settings.
+  Every local edit, delete, import, and group change is queued for upload to
+  the server its book is bound to.
+- Generated avatars: a contact without a photo shows their initials on a
+  colour seeded from their name — stable across launches, consistent between
+  the list and the detail pane — so no row renders as an empty hole. The list
+  now shows photos too, decoded once and cached, never per frame.
+- A chosen photo is center-cropped square and scaled down to 512 px before it
+  is embedded, so a camera photo does not become a 10 MB vCard. A photo that
+  already fits, and anything undecodable, is stored byte-for-byte as chosen.
+
 - Contact editing over the substrate's byte-preserving vCard patcher: names,
   emails, phones, addresses, organisation, job title, birthday, nicknames,
   websites, categories, and notes, with `TYPE` labels and one preferred entry
