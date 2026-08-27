@@ -16,6 +16,7 @@ pub fn list<'a>(
     contacts: &'a [Contact],
     selected: Option<&'a ContactKey>,
     query: &str,
+    photos: &'a std::collections::HashMap<ContactKey, widget::image::Handle>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -35,7 +36,8 @@ pub fn list<'a>(
     let mut column = widget::column::with_capacity(contacts.len()).spacing(spacing.space_xxxs);
     for contact in contacts {
         let is_selected = selected.is_some_and(|key| key.matches(contact));
-        column = column.push(row(contact, is_selected));
+        let photo = photos.get(&ContactKey::of(contact));
+        column = column.push(row(contact, is_selected, photo));
     }
 
     widget::scrollable(column.padding(spacing.space_xxs))
@@ -43,7 +45,11 @@ pub fn list<'a>(
         .into()
 }
 
-fn row(contact: &Contact, selected: bool) -> Element<'_, Message> {
+fn row<'a>(
+    contact: &'a Contact,
+    selected: bool,
+    photo: Option<&widget::image::Handle>,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
     // The secondary line is whatever identifies this person best after their
@@ -73,6 +79,11 @@ fn row(contact: &Contact, selected: bool) -> Element<'_, Message> {
         widget::row::with_capacity(2)
             .align_y(Alignment::Center)
             .spacing(spacing.space_xs)
+            .push(crate::ui::avatar::avatar(
+                photo,
+                &contact.label(),
+                f32::from(spacing.space_l),
+            ))
             .push(text)
             .width(Length::Fill),
     )
@@ -106,26 +117,20 @@ pub fn detail<'a>(
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(8).spacing(spacing.space_s);
 
-    // The photo and the name share the header row. Sized in spacing tokens
+    // The avatar and the name share the header row. Sized in spacing tokens
     // rather than pixels, per the conventions doc: no raw pixel values.
     let name = widget::text::title3(contact.label());
-    if let Some(handle) = photo {
-        let side = f32::from(spacing.space_xxl);
-        column = column.push(
-            widget::row::with_capacity(2)
-                .align_y(Alignment::Center)
-                .spacing(spacing.space_s)
-                .push(
-                    widget::image(handle.clone())
-                        .width(Length::Fixed(side))
-                        .height(Length::Fixed(side))
-                        .border_radius([side / 2.0; 4]),
-                )
-                .push(name),
-        );
-    } else {
-        column = column.push(name);
-    }
+    column = column.push(
+        widget::row::with_capacity(2)
+            .align_y(Alignment::Center)
+            .spacing(spacing.space_s)
+            .push(crate::ui::avatar::avatar(
+                photo,
+                &contact.label(),
+                f32::from(spacing.space_xxl),
+            ))
+            .push(name),
+    );
 
     if let Some(org) = &contact.organisation {
         let heading = match &contact.title {

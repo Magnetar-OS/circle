@@ -38,6 +38,13 @@ pub struct Config {
     /// Existing cards always keep the version their own bytes declare — the
     /// patcher never converts, so this switch touches only creation.
     pub prefer_vcard4: bool,
+
+    /// Minutes between background sync passes; `0` means never.
+    ///
+    /// Off by default: an app that opens a network connection on a timer
+    /// without being asked is a surprise, and an address book changes rarely
+    /// enough that "when I press Sync" is a sensible default cadence.
+    pub sync_interval_minutes: u32,
 }
 
 impl Config {

@@ -2,6 +2,8 @@
 
 //! Widgets and view helpers.
 
+pub mod accounts;
+pub mod avatar;
 pub mod csv;
 pub mod editor;
 pub mod list;

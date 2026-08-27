@@ -30,7 +30,7 @@ const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps
 /// same UID in both books — which is the normal case Circle's linking model
 /// (03, tier 5) is eventually built on, not an error. Keying the selection on
 /// the UID alone would make those two rows the same row.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ContactKey {
     pub book: String,
     pub uid: String,
@@ -157,6 +157,17 @@ pub struct AppModel {
     config_handler: Option<cosmic::cosmic_config::Config>,
 
     store: Option<ContactStore>,
+    /// Accounts and credentials, shared with Slate — one `accounts.toml` for
+    /// the whole suite. `None` when the account store could not be opened; the
+    /// address book still works, it just cannot sync.
+    accounts: Option<cosmic_pim_accounts::AccountStore>,
+    /// The in-progress "add an account" form on the Accounts page.
+    account_form: Option<AccountForm>,
+    /// A sync pass is in flight. One at a time: two passes racing on the same
+    /// sidecar files is the bug this flag exists to prevent.
+    syncing: bool,
+    /// The last pass's per-account summaries, shown on the Accounts page.
+    sync_status: Option<String>,
     nav: nav_bar::Model,
     /// Writable books, cached as parallel id/name vectors.
     ///
@@ -169,14 +180,15 @@ pub struct AppModel {
     /// Everything matching the current query and book filter, sorted.
     contacts: Vec<Contact>,
     selected: Option<ContactKey>,
-    /// The selected contact's decoded photo, if it has one.
+    /// Decoded photos, one entry per contact that has one.
     ///
     /// Cached because `view` runs every frame and a PHOTO is hundreds of
-    /// kilobytes of base64 — decoding it per redraw would burn a visible
-    /// amount of CPU on an idle window. Refreshed whenever the selection
-    /// changes or the list reloads; only ever one entry, because only the
-    /// detail pane shows an image at all.
-    photo: Option<widget::image::Handle>,
+    /// kilobytes of base64 — decoding per redraw would burn a visible amount
+    /// of CPU on an idle window, and re-creating a `Handle` per frame would
+    /// defeat the renderer's texture cache too. Filled lazily by `reload` for
+    /// the rows in view, and cleared whenever the bytes on disk may have
+    /// changed (an external edit, a sync pass, an explicit refresh).
+    photos: HashMap<ContactKey, widget::image::Handle>,
     query: String,
 
     /// `Some` while a contact is being edited or created.
@@ -190,6 +202,16 @@ pub struct AppModel {
     toasts: widget::Toasts<Message>,
     /// Set when the store could not be opened at all.
     fatal: Option<String>,
+}
+
+/// The in-progress "add an account" form on the Accounts page.
+#[derive(Clone, Debug, Default)]
+pub struct AccountForm {
+    pub display_name: String,
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +250,18 @@ pub enum Message {
     SortByGivenName(bool),
     DefaultBook(usize),
     PreferVcard4(bool),
+    SyncInterval(usize),
+
+    AccountAddStart,
+    AccountAddCancel,
+    AccountAddConfirm,
+    AccountNameChanged(String),
+    AccountUrlChanged(String),
+    AccountUsernameChanged(String),
+    AccountPasswordChanged(String),
+    AccountRemove(String),
+    SyncNow,
+    SyncFinished(Vec<String>, bool),
 
     NewContact,
     EditContact,
@@ -261,6 +295,7 @@ pub enum ContextPage {
     #[default]
     About,
     Settings,
+    Accounts,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -274,6 +309,8 @@ pub enum MenuAction {
     ImportCsv,
     Export,
     Refresh,
+    SyncNow,
+    Accounts,
     Settings,
     About,
 }
@@ -292,6 +329,8 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::ImportCsv => Message::ImportCsvRequested,
             MenuAction::Export => Message::ExportRequested,
             MenuAction::Refresh => Message::Refresh,
+            MenuAction::SyncNow => Message::SyncNow,
+            MenuAction::Accounts => Message::ToggleContextPage(ContextPage::Accounts),
             MenuAction::Settings => Message::ToggleContextPage(ContextPage::Settings),
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
         }
@@ -302,6 +341,23 @@ impl menu::action::MenuAction for MenuAction {
 fn search_id() -> widget::Id {
     widget::Id::new("search")
 }
+
+/// The background sync cadences the settings dropdown offers, in minutes.
+/// Position-matched to `sync_interval_labels`; `0` is "never".
+const SYNC_INTERVALS: [u32; 4] = [0, 15, 30, 60];
+
+/// The dropdown's labels. A `LazyLock` because `widget::dropdown` borrows its
+/// labels for the lifetime of the view, so they cannot be built inside
+/// `settings_view` — and resolved lazily because `fl!` needs the loader
+/// `main` initialises first.
+static SYNC_INTERVAL_LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    vec![
+        fl!("sync-off"),
+        fl!("sync-minutes", minutes = 15),
+        fl!("sync-minutes", minutes = 30),
+        fl!("sync-minutes", minutes = 60),
+    ]
+});
 
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
@@ -347,6 +403,16 @@ impl cosmic::Application for AppModel {
             }
         };
 
+        // Shared with Slate: the same accounts.toml, the same keychain slots.
+        // An account added in either app syncs for both.
+        let accounts = match cosmic_pim_accounts::AccountStore::open_default() {
+            Ok(accounts) => Some(accounts),
+            Err(why) => {
+                tracing::warn!(%why, "cannot open the account store; sync is unavailable");
+                None
+            }
+        };
+
         let mut model = Self {
             core,
             about,
@@ -355,12 +421,16 @@ impl cosmic::Application for AppModel {
             config,
             config_handler,
             store,
+            accounts,
+            account_form: None,
+            syncing: false,
+            sync_status: None,
             nav: nav_bar::Model::default(),
             writable_ids: Vec::new(),
             writable_names: Vec::new(),
             contacts: Vec::new(),
             selected: None,
-            photo: None,
+            photos: HashMap::new(),
             query: String::new(),
             editor: None,
             csv: None,
@@ -474,6 +544,7 @@ impl cosmic::Application for AppModel {
                     menu::Item::Button(fl!("export"), None, MenuAction::Export),
                     menu::Item::Divider,
                     menu::Item::Button(fl!("refresh"), None, MenuAction::Refresh),
+                    menu::Item::Button(fl!("sync-now"), None, MenuAction::SyncNow),
                 ],
             ),
         );
@@ -508,6 +579,7 @@ impl cosmic::Application for AppModel {
             menu::items(
                 &self.key_binds,
                 vec![
+                    menu::Item::Button(fl!("accounts"), None, MenuAction::Accounts),
                     menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
                     menu::Item::Button(fl!("about"), None, MenuAction::About),
                 ],
@@ -602,6 +674,16 @@ impl cosmic::Application for AppModel {
                 Message::ToggleContextPage(ContextPage::Settings),
             )
             .title(fl!("settings")),
+            ContextPage::Accounts => context_drawer::context_drawer(
+                crate::ui::accounts::view(
+                    self.accounts.as_ref().map_or(&[], |a| a.accounts()),
+                    self.account_form.as_ref(),
+                    self.syncing,
+                    self.sync_status.as_deref(),
+                ),
+                Message::ToggleContextPage(ContextPage::Accounts),
+            )
+            .title(fl!("accounts")),
         })
     }
 
@@ -628,6 +710,7 @@ impl cosmic::Application for AppModel {
                 &self.contacts,
                 self.selected.as_ref(),
                 &self.query,
+                &self.photos,
             ))
             .width(Length::Fixed(320.0));
 
@@ -641,7 +724,7 @@ impl cosmic::Application for AppModel {
                         .as_ref()
                         .and_then(|s| s.book(&contact.addressbook_id))
                         .map(|b| b.name.as_str()),
-                    self.photo.as_ref(),
+                    self.photos.get(&ContactKey::of(contact)),
                 ),
                 None => widget::container(
                     widget::text::body(fl!("no-selection"))
@@ -664,7 +747,7 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        Subscription::batch(vec![
+        let mut subscriptions = vec![
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| {
@@ -690,7 +773,20 @@ impl cosmic::Application for AppModel {
                 ) => Some(Message::Key(modifiers, key, physical_key)),
                 _ => None,
             }),
-        ])
+        ];
+
+        // Background sync, on the user's chosen cadence. The tick sends a
+        // plain SyncNow, so a pass already in flight makes it a no-op rather
+        // than a second concurrent pass.
+        if self.config.sync_interval_minutes > 0 && self.accounts.is_some() {
+            let minutes = u64::from(self.config.sync_interval_minutes);
+            subscriptions.push(
+                cosmic::iced::time::every(std::time::Duration::from_secs(minutes * 60))
+                    .map(|_| Message::SyncNow),
+            );
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
@@ -719,7 +815,6 @@ impl cosmic::Application for AppModel {
             }
             Message::Select(key) => {
                 self.selected = Some(key);
-                self.reload_photo();
             }
             Message::Copy(value) => return cosmic::iced::clipboard::write(value),
             // A burst of filesystem changes and an explicit refresh do the same
@@ -729,6 +824,9 @@ impl cosmic::Application for AppModel {
                 if let Some(store) = self.store.as_mut() {
                     store.refresh();
                 }
+                // The bytes on disk may have changed under any entry — that is
+                // exactly what a sync run editing cards looks like.
+                self.photos.clear();
                 self.rebuild_nav();
                 self.reload();
             }
@@ -760,6 +858,49 @@ impl cosmic::Application for AppModel {
             Message::PreferVcard4(value) => {
                 self.config.prefer_vcard4 = value;
                 self.persist_config();
+            }
+            Message::SyncInterval(index) => {
+                self.config.sync_interval_minutes =
+                    SYNC_INTERVALS.get(index).copied().unwrap_or_default();
+                self.persist_config();
+            }
+
+            Message::AccountAddStart => self.account_form = Some(AccountForm::default()),
+            Message::AccountAddCancel => self.account_form = None,
+            Message::AccountAddConfirm => return self.confirm_account(),
+            Message::AccountNameChanged(value) => {
+                self.with_account_form(|form| form.display_name = value);
+            }
+            Message::AccountUrlChanged(value) => {
+                self.with_account_form(|form| form.url = value);
+            }
+            Message::AccountUsernameChanged(value) => {
+                self.with_account_form(|form| form.username = value);
+            }
+            Message::AccountPasswordChanged(value) => {
+                self.with_account_form(|form| form.password = value);
+            }
+            Message::AccountRemove(id) => {
+                if let Some(accounts) = self.accounts.as_mut()
+                    && let Err(why) = accounts.remove(&id)
+                {
+                    return self.toast(format!("{}: {why}", fl!("accounts")));
+                }
+            }
+            Message::SyncNow => return self.sync_now(),
+            Message::SyncFinished(lines, changed) => {
+                self.syncing = false;
+                self.sync_status = Some(lines.join("\n"));
+                if changed {
+                    // Sync wrote `.vcf` files directly; everything read from
+                    // them — the list, the nav, the photo cache — is stale.
+                    if let Some(store) = self.store.as_mut() {
+                        store.refresh();
+                    }
+                    self.photos.clear();
+                    self.rebuild_nav();
+                    self.reload();
+                }
             }
 
             Message::NewContact => {
@@ -1013,9 +1154,17 @@ impl cosmic::Application for AppModel {
                 let Some(store) = self.store.as_mut() else {
                     return Task::none();
                 };
+                // The server-side coordinates live in the sidecar, which
+                // survives the local delete — but the file name has to be
+                // taken while the card still exists.
+                let file_name = store.contact(&key.book, &key.uid).map(|c| c.file_name);
                 if let Err(why) = store.delete(&key.book, &key.uid) {
                     return self.toast(fl!("error-delete", name = name, why = why.to_string()));
                 }
+                if let Some(file_name) = file_name {
+                    queue_removal(store, &key.book, &file_name);
+                }
+                self.photos.remove(&key);
                 self.selected = None;
                 self.editor = None;
                 if was_group {
@@ -1049,8 +1198,9 @@ impl cosmic::Application for AppModel {
                 let Some(book) = store.default_book().map(|b| b.id.clone()) else {
                     return self.toast(fl!("error-no-writable-book"));
                 };
-                if let Err(why) = store.create_group(name.trim(), &book, version) {
-                    return self.toast(why.to_string());
+                match store.create_group(name.trim(), &book, version) {
+                    Ok(group) => queue_push(store, &book, &group.file_name),
+                    Err(why) => return self.toast(why.to_string()),
                 }
                 self.rebuild_nav();
                 self.reload();
@@ -1251,25 +1401,27 @@ impl AppModel {
         {
             self.selected = None;
         }
-        // The bytes on disk may have changed even if the selection did not —
-        // that is exactly what a sync run editing the open card looks like.
-        self.reload_photo();
-    }
-
-    /// Re-decodes the selected contact's photo into the one-entry cache.
-    fn reload_photo(&mut self) {
-        self.photo = self
-            .selected_contact()
-            .filter(|c| c.has_photo)
-            .and_then(|c| cosmic_pim_core::vcard::photo(&c.raw))
-            .and_then(|photo| match photo {
-                cosmic_pim_core::vcard::Photo::Bytes { data, .. } => {
-                    Some(widget::image::Handle::from_bytes(data))
+        // Fill the photo cache for whatever the list now shows. Only entries
+        // not already decoded cost anything, so a search keystroke that
+        // narrows the list decodes nothing at all.
+        for contact in &self.contacts {
+            if !contact.has_photo {
+                continue;
+            }
+            let key = ContactKey::of(contact);
+            if self.photos.contains_key(&key) {
+                continue;
+            }
+            match cosmic_pim_core::vcard::photo(&contact.raw) {
+                Some(cosmic_pim_core::vcard::Photo::Bytes { data, .. }) => {
+                    self.photos
+                        .insert(key, widget::image::Handle::from_bytes(data));
                 }
                 // A remote avatar is never fetched — network access for a
                 // contact photo is off by design (03: opt-in "if ever").
-                cosmic_pim_core::vcard::Photo::Uri(_) => None,
-            });
+                Some(cosmic_pim_core::vcard::Photo::Uri(_)) | None => {}
+            }
+        }
     }
 
     fn selected_contact(&self) -> Option<&Contact> {
@@ -1373,6 +1525,11 @@ impl AppModel {
                 self.toast(fl!("import-empty", path = file_label(path)))
             }
             Ok(summary) => {
+                for file in &summary.files {
+                    queue_push(store, &book_id, file);
+                }
+                // An updated card may carry a new photo under an old key.
+                self.photos.clear();
                 self.reload();
                 self.toast(fl!(
                     "import-done",
@@ -1415,12 +1572,20 @@ impl AppModel {
             ));
         }
 
+        // The save landed — queue it for upload before anything later in this
+        // function can fail. The photo patch below rewrites the same file, so
+        // one queue entry covers both.
+        if let Some(saved) = store.contact(&contact.addressbook_id, &contact.uid) {
+            queue_push(store, &contact.addressbook_id, &saved.file_name);
+        }
+
         // The photo change runs against the *saved* bytes, which is what makes
         // it uniform for new and existing cards: after the save above, both
         // have a card on disk to patch. The photo is not part of the model on
         // purpose — see `Contact::has_photo` — so it cannot travel through
         // `save_as`.
         if let Err(why) = apply_photo_edit(store, &contact, &photo_edit) {
+            self.photos.remove(&ContactKey::of(&contact));
             self.editor = None;
             self.selected = Some(ContactKey::of(&contact));
             self.reload();
@@ -1431,7 +1596,15 @@ impl AppModel {
         // — only the changed ones, or every contact save would churn every
         // group file and push them all to the server unchanged.
         let membership_error = apply_group_changes(store, &contact, &changed_groups);
+        for row in &changed_groups {
+            if let Some(group) = store.contact(&contact.addressbook_id, &row.uid) {
+                queue_push(store, &contact.addressbook_id, &group.file_name);
+            }
+        }
 
+        // The card's bytes just changed; a cached photo decoded from the old
+        // bytes must not survive the save.
+        self.photos.remove(&ContactKey::of(&contact));
         self.editor = None;
         self.selected = Some(ContactKey::of(&contact));
         self.rebuild_nav();
@@ -1446,6 +1619,110 @@ impl AppModel {
         self.toasts
             .push(widget::Toast::new(message))
             .map(Into::into)
+    }
+
+    fn with_account_form(&mut self, f: impl FnOnce(&mut AccountForm)) {
+        if let Some(form) = self.account_form.as_mut() {
+            f(form);
+        }
+    }
+
+    /// Validates the add-account form and stores the account.
+    fn confirm_account(&mut self) -> Task<Message> {
+        let Some(form) = self.account_form.clone() else {
+            return Task::none();
+        };
+        let Some(accounts) = self.accounts.as_mut() else {
+            return self.toast(fl!("error-no-account-store"));
+        };
+
+        let url = form.url.trim();
+        // Refuse plaintext up front rather than after the password has been
+        // typed, stored, and sent: a CardDAV password over http is compromised
+        // the first time it is used, and no later warning undoes that.
+        if !url.starts_with("https://") && !url.starts_with("http://") {
+            self.with_account_form(|f| f.error = Some(fl!("error-url-scheme")));
+            return Task::none();
+        }
+        if url.starts_with("http://") && !is_loopback(url) {
+            self.with_account_form(|f| f.error = Some(fl!("error-url-insecure")));
+            return Task::none();
+        }
+
+        let display_name = if form.display_name.trim().is_empty() {
+            form.username.trim().to_owned()
+        } else {
+            form.display_name.trim().to_owned()
+        };
+
+        let account = cosmic_pim_accounts::Account::new(&display_name, url, form.username.trim());
+
+        match accounts.add(account, &form.password) {
+            Ok(()) => {
+                self.account_form = None;
+                // Sync immediately: the user just told us where their
+                // contacts are, and waiting for a timer to act on that feels
+                // broken.
+                self.sync_now()
+            }
+            Err(why) => {
+                self.with_account_form(|f| f.error = Some(why.to_string()));
+                Task::none()
+            }
+        }
+    }
+
+    /// Runs a sync pass off the UI thread.
+    fn sync_now(&mut self) -> Task<Message> {
+        if self.syncing || self.accounts.is_none() {
+            return Task::none();
+        }
+        self.syncing = true;
+        self.sync_status = None;
+
+        // The sync engine walks CalDAV and CardDAV in one pass: an account can
+        // offer both, and the calendars land in the suite's calendar root for
+        // Slate to read — the mirror image of Slate's own sync pass filling
+        // the contacts root for Circle.
+        let calendar_root = cosmic_pim_core::store::vdir::default_root();
+        let contacts_root = self
+            .store
+            .as_ref()
+            .map_or_else(cosmic_pim_core::store::contacts::default_root, |store| {
+                store.root().to_path_buf()
+            });
+        // Provider manifests: how an account that names a provider rather than
+        // a raw URL resolves its endpoints and OAuth client.
+        let registry = cosmic_pim_accounts::Registry::load();
+        cosmic::task::future(async move {
+            let outcome = tokio::task::spawn_blocking(move || {
+                // Reopened inside the task: `AccountStore` is not shared with
+                // the UI thread, and re-reading also picks up any change made
+                // since the button was pressed.
+                let mut accounts = match cosmic_pim_accounts::AccountStore::open_default() {
+                    Ok(accounts) => accounts,
+                    Err(why) => return (vec![why.to_string()], false),
+                };
+                let reports = cosmic_pim_sync::sync_all(
+                    &mut accounts,
+                    &registry,
+                    &calendar_root,
+                    &contacts_root,
+                );
+                let changed = reports.iter().any(cosmic_pim_sync::AccountReport::changed);
+                (
+                    reports
+                        .iter()
+                        .map(cosmic_pim_sync::AccountReport::summary)
+                        .collect(),
+                    changed,
+                )
+            })
+            .await
+            .unwrap_or_else(|why| (vec![why.to_string()], false));
+
+            Message::SyncFinished(outcome.0, outcome.1)
+        })
     }
 
     /// Commits the CSV mapping: every row becomes a contact in the default
@@ -1493,6 +1770,9 @@ impl AppModel {
                     name = contact.label(),
                     why = why.to_string()
                 ));
+            }
+            if let Some(saved) = store.contact(&book_id, &contact.uid) {
+                queue_push(store, &book_id, &saved.file_name);
             }
         }
 
@@ -1597,6 +1877,26 @@ impl AppModel {
         );
         column = column.push(general);
 
+        // Background sync cadence — only meaningful when accounts can exist
+        // at all.
+        if self.accounts.is_some() {
+            let selected = SYNC_INTERVALS
+                .iter()
+                .position(|m| *m == self.config.sync_interval_minutes)
+                .unwrap_or(0);
+            column = column.push(
+                widget::settings::section().title(fl!("sync")).add(
+                    widget::settings::item::builder(fl!("sync-interval"))
+                        .description(fl!("sync-interval-description"))
+                        .control(widget::dropdown(
+                            &*SYNC_INTERVAL_LABELS,
+                            Some(selected),
+                            Message::SyncInterval,
+                        )),
+                ),
+            );
+        }
+
         let books = self
             .store
             .as_ref()
@@ -1642,7 +1942,7 @@ fn apply_photo_edit(
         editor::PhotoEdit::Keep => return Ok(()),
         editor::PhotoEdit::Set(path) => {
             let data = std::fs::read(path).map_err(|why| why.to_string())?;
-            let mime = photo_mime(path);
+            let (data, mime) = process_photo(data, photo_mime(path));
             let saved = store
                 .contact(&contact.addressbook_id, &contact.uid)
                 .ok_or_else(|| fl!("error-load-contacts"))?;
@@ -1704,6 +2004,90 @@ fn apply_group_changes(
         }
     }
     first_error
+}
+
+/// The longest side an embedded photo keeps, in pixels.
+///
+/// A vCard photo is decoration beside a name, not an archive of the original
+/// file — and the original is embedded as base64 into a card that some
+/// servers cap at a few megabytes. 512² is larger than any surface Circle
+/// draws and small enough that a card stays a card.
+const PHOTO_SIDE: u32 = 512;
+
+/// Center-crops a chosen photo square and scales it down to [`PHOTO_SIDE`],
+/// re-encoding as JPEG.
+///
+/// Bytes that already fit — square and small — pass through untouched, so
+/// re-setting an exported photo cannot degrade it. Bytes that do not decode
+/// at all also pass through: storing what the user picked is strictly better
+/// than refusing, and the previous behaviour of this code was exactly that.
+fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'static str) {
+    let Ok(img) = image::load_from_memory(&data) else {
+        tracing::warn!("could not decode the chosen photo; storing it unchanged");
+        return (data, fallback_mime);
+    };
+
+    let (width, height) = (img.width(), img.height());
+    let side = width.min(height);
+    if width == height && side <= PHOTO_SIDE {
+        return (data, fallback_mime);
+    }
+
+    let cropped = img.crop_imm((width - side) / 2, (height - side) / 2, side, side);
+    let scaled = if side > PHOTO_SIDE {
+        cropped.resize_exact(
+            PHOTO_SIDE,
+            PHOTO_SIDE,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        cropped
+    };
+
+    // JPEG has no alpha channel, so flatten before encoding.
+    let flat = image::DynamicImage::ImageRgb8(scaled.to_rgb8());
+    let mut out = Vec::new();
+    match flat.write_to(
+        &mut std::io::Cursor::new(&mut out),
+        image::ImageFormat::Jpeg,
+    ) {
+        Ok(()) => (out, "image/jpeg"),
+        Err(why) => {
+            tracing::warn!(%why, "could not re-encode the photo; storing it unchanged");
+            (data, fallback_mime)
+        }
+    }
+}
+
+/// Queues a written card for upload to whatever server its book is bound to.
+///
+/// Storage deliberately knows nothing about CardDAV (see
+/// `cosmic_pim_sync::writeback`), so every write site in this file pairs its
+/// save with this call. A local-only book queues nothing, and a failure to
+/// queue is a warning rather than an error: the local save already succeeded,
+/// and the card's text is not at risk.
+fn queue_push(store: &ContactStore, book_id: &str, file_name: &str) {
+    if let Err(why) = cosmic_pim_sync::queue_save(store.root(), book_id, file_name) {
+        tracing::warn!(book_id, file_name, %why, "could not queue the save for upload");
+    }
+}
+
+/// The delete-side twin of [`queue_push`].
+fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
+    if let Err(why) = cosmic_pim_sync::queue_delete(store.root(), book_id, file_name) {
+        tracing::warn!(book_id, file_name, %why, "could not queue the deletion for upload");
+    }
+}
+
+/// Whether an `http://` URL points at this machine — the one case where
+/// sending a password unencrypted is acceptable, because it never leaves it.
+fn is_loopback(url: &str) -> bool {
+    let host = url
+        .trim_start_matches("http://")
+        .split(['/', ':'])
+        .next()
+        .unwrap_or_default();
+    host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 /// The MIME type an image file's extension implies. The photo bytes are
