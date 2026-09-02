@@ -538,3 +538,67 @@ Grace,Hopper,grace@example.com,grace@import\n\
         "the CSV re-import destroyed the photo a sync had added"
     );
 }
+
+/// The auto-merge contract, from Circle's side: a save queued after an edit
+/// carries the pre-edit bytes as its base — and a second edit before the push
+/// drains does NOT move it, because the server still holds the original.
+///
+/// The base is what lets the sync engine three-way-merge (`merge::overlaps`)
+/// instead of raising a conflict when the server changed the same card; a
+/// Circle that queued without it would silently disable that for every edit.
+#[test]
+fn a_queued_edit_carries_its_pre_edit_base_and_the_first_base_sticks() {
+    use cosmic_pim_caldav::VdirStore;
+    use cosmic_pim_caldav::push::PushQueue as _;
+
+    let mut fixture = fixture();
+
+    // Bind the book to a (pretend) CardDAV collection, the way a provisioned
+    // account would.
+    {
+        let meta = fixture.book.clone();
+        let mut vstore = VdirStore::open(meta).expect("open vdir store");
+        vstore.set_remote("/dav/contacts/", false).expect("bind");
+    }
+
+    // First edit: what the editor does — read, patch, save, queue with the
+    // text it read.
+    let before_first = fixture.ada().raw;
+    let mut editor = fixture.editor();
+    editor.update(Message::Text(Field::Family, "Byron".into()));
+    let saved = editor.finish();
+    fixture.store.save(&saved).unwrap();
+    cosmic_pim_sync::queue_save_with_base(
+        fixture.store.root(),
+        &fixture.book.id,
+        &saved.file_name,
+        Some(&before_first),
+    )
+    .expect("queue");
+
+    // Second edit before any push drains.
+    let before_second = fixture.ada().raw;
+    assert_ne!(before_first, before_second, "the first edit did not land");
+    let mut editor = fixture.editor();
+    editor.update(Message::Text(Field::Given, "Augusta".into()));
+    let saved = editor.finish();
+    fixture.store.save(&saved).unwrap();
+    cosmic_pim_sync::queue_save_with_base(
+        fixture.store.root(),
+        &fixture.book.id,
+        &saved.file_name,
+        Some(&before_second),
+    )
+    .expect("queue");
+
+    let pending = VdirStore::open(fixture.book.clone())
+        .expect("reopen")
+        .pending();
+    assert_eq!(pending.len(), 1, "one entry per href, reset not appended");
+    assert_eq!(
+        pending[0].base.as_deref(),
+        Some(before_first.as_str()),
+        "the base moved on re-enqueue — the server still holds the FIRST text, \
+         and merging against the second would silently drop the first edit"
+    );
+}

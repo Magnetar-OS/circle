@@ -40,8 +40,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0.229", features = ["derive"] }
 # The single-instance hand-over serialises its request as JSON (Slate does the
-# same), and the pop-launcher plugin speaks newline-delimited JSON on stdio.
+# same), the pop-launcher plugin speaks newline-delimited JSON on stdio, and
+# the link store's records are JSON files under `.links/`.
 serde_json = "1"
+# Ids for link records. Already in the graph through cosmic-pim-core.
+uuid = { version = "1", features = ["v4"] }
+# Duplicate review: transliteration-aware name similarity (Γιώργος ↔ George),
+# suggestions only — matches never auto-merge anything (03 §6).
+any_ascii = "0.3"
+strsim = "0.11"
 # CSV import. RFC 4180 quoting — embedded commas, quotes, and newlines — is
 # exactly the kind of parser that looks trivial and is not; the boring crate
 # is the right answer.
@@ -65,6 +72,9 @@ features = [
 ]
 
 [dev-dependencies]
+# The write-path tests read the push queue back to prove a queued save carries
+# its pre-edit base — the queue lives behind caldav's VdirStore.
+cosmic-pim-caldav = { path = "../cosmic-pim/crates/cosmic-pim-caldav" }
 # Integration tests write real address books to a scratch directory rather than
 # mocking the store: the thing under test is that bytes survive a round trip
 # through the filesystem, which a mock cannot demonstrate.

@@ -1873,10 +1873,18 @@ impl AppModel {
             if contact.categories.iter().any(|c| c == &name) {
                 continue;
             }
+            let base = contact.raw.clone();
             contact.categories.push(name.clone());
             match store.save_as(&contact, version) {
                 Ok(()) => {
-                    queue_push(store, &key.book, &contact.file_name);
+                    // The card was read two lines up; its raw is the pre-edit
+                    // text sync can merge against.
+                    queue_push_with_base(
+                        store,
+                        &key.book,
+                        &contact.file_name,
+                        (!base.trim().is_empty()).then_some(base.as_str()),
+                    );
                     joined += 1;
                 }
                 Err(why) => {
@@ -2072,9 +2080,13 @@ impl AppModel {
 
         // The save landed — queue it for upload before anything later in this
         // function can fail. The photo patch below rewrites the same file, so
-        // one queue entry covers both.
+        // one queue entry covers both. The base is the text the editor was
+        // opened on — exactly what this edit was made against — which is what
+        // lets sync auto-merge if the server changed the card meanwhile; a
+        // brand-new contact has no before and queues without one.
         if let Some(saved) = store.contact(&contact.addressbook_id, &contact.uid) {
-            queue_push(store, &contact.addressbook_id, &saved.file_name);
+            let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
+            queue_push_with_base(store, &contact.addressbook_id, &saved.file_name, base);
         }
 
         // The photo change runs against the *saved* bytes, which is what makes
@@ -2094,11 +2106,6 @@ impl AppModel {
         // — only the changed ones, or every contact save would churn every
         // group file and push them all to the server unchanged.
         let membership_error = apply_group_changes(store, &contact, &changed_groups);
-        for row in &changed_groups {
-            if let Some(group) = store.contact(&contact.addressbook_id, &row.uid) {
-                queue_push(store, &contact.addressbook_id, &group.file_name);
-            }
-        }
 
         // The card's bytes just changed; a cached photo decoded from the old
         // bytes must not survive the save.
@@ -2270,7 +2277,10 @@ impl AppModel {
                 ));
             }
             if let Some(saved) = store.contact(&book_id, &contact.uid) {
-                queue_push(store, &book_id, &saved.file_name);
+                // An updated row adopted the existing card's bytes above;
+                // those are its base. An added row has no before.
+                let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
+                queue_push_with_base(store, &book_id, &saved.file_name, base);
             }
         }
 
@@ -2497,8 +2507,19 @@ fn apply_group_changes(
             members.retain(|uri| member_uid(uri) != Some(contact.uid.as_str()));
         }
 
-        if let Err(why) = store.set_group_members(&contact.addressbook_id, &row.uid, &members) {
-            first_error.get_or_insert_with(|| why.to_string());
+        match store.set_group_members(&contact.addressbook_id, &row.uid, &members) {
+            // Queued here rather than by the caller because this is where the
+            // group's pre-edit bytes are in hand — the base sync merges
+            // against if the server changed the group card meanwhile.
+            Ok(()) => queue_push_with_base(
+                store,
+                &contact.addressbook_id,
+                &group.file_name,
+                Some(&group.raw),
+            ),
+            Err(why) => {
+                first_error.get_or_insert_with(|| why.to_string());
+            }
         }
     }
     first_error
@@ -2564,8 +2585,25 @@ fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'stat
 /// save with this call. A local-only book queues nothing, and a failure to
 /// queue is a warning rather than an error: the local save already succeeded,
 /// and the card's text is not at risk.
+///
+/// Sites that read the card before overwriting it call
+/// [`queue_push_with_base`] instead: the pre-edit bytes are what let the sync
+/// engine three-way-merge automatically when the server turns out to have
+/// changed the same card. This form is for writes with no meaningful "before"
+/// — a brand-new file, an undo restoring a deleted one, a bulk import.
 fn queue_push(store: &ContactStore, book_id: &str, file_name: &str) {
-    if let Err(why) = cosmic_pim_sync::queue_save(store.root(), book_id, file_name) {
+    queue_push_with_base(store, book_id, file_name, None);
+}
+
+/// [`queue_push`], carrying the card's pre-edit bytes.
+///
+/// `base` is what the file held when the caller read it — the text the edit
+/// was made against. The queue keeps the base from the first enqueue only, so
+/// stacked unsent edits keep the oldest base (the last text the server
+/// acknowledged) without any bookkeeping here.
+fn queue_push_with_base(store: &ContactStore, book_id: &str, file_name: &str, base: Option<&str>) {
+    if let Err(why) = cosmic_pim_sync::queue_save_with_base(store.root(), book_id, file_name, base)
+    {
         tracing::warn!(book_id, file_name, %why, "could not queue the save for upload");
     }
 }
