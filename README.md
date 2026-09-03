@@ -51,6 +51,13 @@ Reading, searching, creating, editing, and deleting contacts all work.
   one action.
 - **An adaptive layout.** Three panes on a wide window; below 640 px the list
   and detail take turns, down to 360 px.
+- **Linking.** One person, several cards: the list shows one row, the detail
+  pane composes the values from every card and says which book each came
+  from, and Unlink takes one back out. Linking never rewrites a card — see
+  [Linking](#linking).
+- **Duplicate review** — candidates from a shared address, a shared number, or
+  a transliterated name; reviewed in pairs, answered Link or Not the same,
+  never merged automatically.
 - **Photos and avatars.** Inline `PHOTO` data (both the 3.0 `ENCODING=b` and
   the 4.0 `data:` forms) is decoded and shown in the list and beside the name;
   a contact without a photo gets generated initials on a colour seeded from
@@ -186,6 +193,40 @@ Two things that patcher does shape what the editor offers:
 The detail pane and the editor both end with a short list of the properties the
 card carries that Circle will not touch, so what is being preserved is visible
 rather than merely promised.
+
+## Linking
+
+Two accounts holding the same person is the normal case, not an error, and
+merging them is the one address-book operation that destroys what the files
+can no longer reconstruct. So Circle links instead.
+
+A *person* is a record naming two or more cards, stored as JSON in
+`~/.local/share/contacts/.links/`. The dot makes it invisible to the vdir
+collection scanner, so it is never listed as an address book and never
+offered to a server as a collection — it is Circle's own metadata, beside
+the books rather than inside them.
+
+The cards themselves are not touched. Linking writes one small file; the
+`.vcf` bytes are identical before and after, each card keeps syncing to its
+own account, and unlinking restores two ordinary contacts with nothing lost.
+[tests/linking.rs](tests/linking.rs) pins exactly that, byte for byte.
+
+What the composed view does with two cards:
+
+- **Lists union, duplicates collapse.** A shared address appears once, in the
+  head card's spelling — showing it twice would make linking look like it
+  made things worse. Numbers collapse across spellings, so `+30 210 1234567`
+  and `2101234567` are one row.
+- **The first card wins a scalar.** Organisation, birthday, note: the head's
+  value if it has one, else the next card's. The head is the first card you
+  picked when linking.
+- **Every value says where it lives.** A linked person's rows carry their
+  book's name, because that is which server an edit to that value would
+  reach.
+
+Editing a linked person edits **one** card — the head — and the editor says
+which book that is. Values belonging to another card are edited by unlinking,
+or by selecting that card in its own book.
 
 ## Licence
 

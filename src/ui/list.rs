@@ -114,7 +114,7 @@ fn row<'a>(
     .into()
 }
 
-/// The detail pane for one contact.
+/// The detail pane for one person — one card, or several linked into one.
 ///
 /// # Why every value here is selectable
 ///
@@ -126,122 +126,91 @@ fn row<'a>(
 /// All context menu), with an explicit copy button beside each one for the
 /// people who never think to right-click.
 pub fn detail<'a>(
-    contact: &'a Contact,
-    book_name: Option<&'a str>,
-    photo: Option<&'a widget::image::Handle>,
+    person: &crate::ui::person::Composed<'_>,
+    photo: Option<&widget::image::Handle>,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(8).spacing(spacing.space_s);
 
     // The avatar and the name share the header row. Sized in spacing tokens
     // rather than pixels, per the conventions doc: no raw pixel values.
-    let name = widget::text::title3(contact.label());
     column = column.push(
         widget::row::with_capacity(2)
             .align_y(Alignment::Center)
             .spacing(spacing.space_s)
             .push(crate::ui::avatar::avatar(
                 photo,
-                &contact.label(),
+                &person.label,
                 f32::from(spacing.space_xxl),
             ))
-            .push(name),
+            .push(widget::text::title3(person.label.clone())),
     );
 
-    if let Some(org) = &contact.organisation {
-        let heading = match &contact.title {
-            Some(title) if !title.trim().is_empty() => format!("{title}, {org}"),
-            _ => org.clone(),
-        };
+    if let Some(heading) = &person.organisation {
         column = column.push(
-            widget::text::body(heading).class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
-        );
-    }
-
-    if !contact.nicknames.is_empty() {
-        column = column.push(
-            widget::text::caption(format!("“{}”", contact.nicknames.join("”, “")))
+            widget::text::body(heading.clone())
                 .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
         );
     }
 
-    let mut section = widget::settings::section();
-    let mut any = false;
-
-    for email in &contact.emails {
-        any = true;
-        section = section.add(value_row(
-            email.label().unwrap_or("email").to_owned(),
-            &email.value,
-            Some(format!("mailto:{}", email.value)),
-            "mail-send-symbolic",
-        ));
-    }
-    for phone in &contact.phones {
-        any = true;
-        section = section.add(value_row(
-            phone.label().unwrap_or("phone").to_owned(),
-            &phone.value,
-            // `tel:` is handed to the desktop's handler. Without one nothing
-            // happens, which is why the value stays copyable regardless.
-            Some(format!("tel:{}", phone.value.replace(' ', ""))),
-            "call-start-symbolic",
-        ));
-    }
-    for address in &contact.addresses {
-        any = true;
-        section = section.add(value_row(
-            address
-                .types
-                .first()
-                .cloned()
-                .unwrap_or_else(|| fl!("address")),
-            &address.one_line(),
-            None,
-            "",
-        ));
-    }
-    for url in &contact.urls {
-        any = true;
-        section = section.add(value_row(
-            url.label().unwrap_or("website").to_owned(),
-            &url.value,
-            Some(url.value.clone()),
-            "web-browser-symbolic",
-        ));
-    }
-    if let Some(birthday) = contact.birthday {
-        any = true;
-        section = section.add(value_row(
-            fl!("birthday"),
-            &birthday.format("%-d %B %Y").to_string(),
-            None,
-            "",
-        ));
-    }
-    if let Some(note) = &contact.note {
-        any = true;
-        section = section.add(value_row(fl!("note"), note, None, ""));
+    if !person.nicknames.is_empty() {
+        column = column.push(
+            widget::text::caption(format!(
+                "\u{201c}{}\u{201d}",
+                person.nicknames.join("\u{201d}, \u{201c}")
+            ))
+            .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
+        );
     }
 
-    if any {
+    if !person.fields.is_empty() {
+        let mut section = widget::settings::section();
+        for field in &person.fields {
+            section = section.add(value_row(field));
+        }
         column = column.push(section);
     }
 
-    if !contact.categories.is_empty() {
-        column = column.push(chips(&contact.categories));
+    if !person.categories.is_empty() {
+        column = column.push(chips(&person.categories));
     }
 
-    // Provenance and honesty: which book this came from, and what the card
-    // carries that this app will not touch.
-    let mut footer = widget::column::with_capacity(2).spacing(spacing.space_xxs);
-    if let Some(name) = book_name {
+    // Provenance and honesty: which cards this person is, and what they carry
+    // that this app will not touch.
+    let mut footer = widget::column::with_capacity(3).spacing(spacing.space_xxs);
+    if person.is_linked() {
+        // Linked: name every card and offer to take each one back out. One
+        // row per card rather than a joined string, because unlinking has to
+        // name which card it removes.
+        let mut section = widget::settings::section().title(fl!("linked-cards"));
+        for (card, book) in person.cards {
+            section = section.add(
+                widget::settings::item::builder((*book).to_owned())
+                    .description(card.label())
+                    .control(
+                        widget::button::text(fl!("unlink"))
+                            .on_press(Message::Unlink(ContactKey::of(card))),
+                    ),
+            );
+        }
+        column = column.push(section);
+    } else if let Some((_, book)) = person.cards.first() {
         footer = footer.push(
-            widget::text::caption(format!("{}: {name}", fl!("in-book")))
+            widget::text::caption(format!("{}: {book}", fl!("in-book")))
                 .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
         );
     }
-    let unmodelled = crate::ui::editor::unmodelled_properties(&contact.raw);
+
+    // The unmodelled properties of every card underneath, so what is being
+    // preserved stays visible rather than merely promised.
+    let mut unmodelled: Vec<String> = Vec::new();
+    for (card, _) in person.cards {
+        for property in crate::ui::editor::unmodelled_properties(&card.raw) {
+            if !unmodelled.contains(&property) {
+                unmodelled.push(property);
+            }
+        }
+    }
     if !unmodelled.is_empty() {
         footer = footer.push(
             widget::text::caption(format!(
@@ -259,15 +228,11 @@ pub fn detail<'a>(
         .into()
 }
 
-/// One labelled, selectable, copyable value, optionally with an action button.
-fn value_row<'a>(
-    label: String,
-    value: &str,
-    action: Option<String>,
-    action_icon: &'a str,
-) -> Element<'a, Message> {
+/// One labelled, selectable, copyable value, optionally with an action button
+/// and the book it came from.
+fn value_row<'a>(field: &crate::ui::person::Field<'_>) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    let owned = value.to_owned();
+    let owned = field.value.clone();
 
     let mut controls = widget::row::with_capacity(3)
         .align_y(Alignment::Center)
@@ -283,25 +248,30 @@ fn value_row<'a>(
     .into();
     controls = controls.push(copy);
 
-    if let Some(url) = action
-        && !action_icon.is_empty()
+    if let Some(url) = &field.action
+        && !field.icon.is_empty()
     {
         controls = controls.push(
-            widget::button::icon(widget::icon::from_name(action_icon))
-                .on_press(Message::LaunchUrl(url)),
+            widget::button::icon(widget::icon::from_name(field.icon))
+                .on_press(Message::LaunchUrl(url.clone())),
         );
     }
 
-    widget::settings::item::builder(label)
-        .control(controls)
-        .into()
+    let mut item = widget::settings::item::builder(field.label.clone());
+    // Which card a value came from, on the row itself: a linked person's
+    // detail pane is otherwise indistinguishable from one card's, and
+    // knowing which server a number will be edited on is the point.
+    if let Some(source) = field.source {
+        item = item.description(source.to_owned());
+    }
+    item.control(controls).into()
 }
 
 /// Categories as wrapping chips rather than a joined string, so a contact in
 /// eight groups does not run off the side of the pane.
-fn chips(categories: &[String]) -> Element<'_, Message> {
+fn chips<'a>(categories: &[String]) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
-    let chips: Vec<Element<'_, Message>> = categories
+    let chips: Vec<Element<'a, Message>> = categories
         .iter()
         .map(|category| {
             widget::container(widget::text::caption(category.clone()))

@@ -7,6 +7,8 @@ pub mod avatar;
 pub mod csv;
 pub mod editor;
 pub mod list;
+pub mod person;
+pub mod review;
 
 /// Dimmed secondary text, matching the rest of the suite.
 #[must_use]

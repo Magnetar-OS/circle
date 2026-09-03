@@ -157,6 +157,17 @@ pub struct AppModel {
     config_handler: Option<cosmic::cosmic_config::Config>,
 
     store: Option<ContactStore>,
+    /// Which cards are the same person. Circle's own metadata, beside the
+    /// books rather than inside them — see [`crate::links`].
+    links: crate::links::LinkStore,
+    /// The non-head cards of every linked person currently in the list, keyed
+    /// by the row that stands for them. Rebuilt by `reload`, because which
+    /// card is the head depends on which of them the filter left visible.
+    folded: HashMap<ContactKey, Vec<Contact>>,
+    /// `Some` while the duplicate review screen is up. Mutually exclusive
+    /// with the editor and the CSV mapper — all three claim the right-hand
+    /// pane.
+    review: Option<Review>,
     /// Accounts and credentials, shared with Slate — one `accounts.toml` for
     /// the whole suite. `None` when the account store could not be opened; the
     /// address book still works, it just cannot sync.
@@ -217,6 +228,19 @@ pub struct AppModel {
     toasts: widget::Toasts<Message>,
     /// Set when the store could not be opened at all.
     fatal: Option<String>,
+}
+
+/// The duplicate review screen's state: the pairs still to ask about, and a
+/// snapshot of the cards they name.
+///
+/// Snapshotted rather than re-read per frame because the screen compares two
+/// specific cards and the comparison must not shift underneath the person
+/// reading it. A card deleted while the screen is open simply stops being
+/// drawn — see `AppModel::side`.
+#[derive(Debug)]
+struct Review {
+    candidates: Vec<crate::dedupe::Candidate>,
+    cards: Vec<Contact>,
 }
 
 /// Everything needed to put a deleted card back, byte for byte.
@@ -330,6 +354,13 @@ pub enum Message {
     DeleteConfirmed,
     DialogCancel,
 
+    Unlink(ContactKey),
+    LinkChecked,
+    ReviewDuplicates,
+    ReviewLink(usize),
+    ReviewIgnore(usize),
+    ReviewClose,
+
     ExportSelectedRequested,
     ExportSelectedTo(PathBuf),
     AddToGroupRequested,
@@ -356,6 +387,7 @@ pub enum MenuAction {
     EditContact,
     Delete,
     SelectAll,
+    Duplicates,
     Search,
     Import,
     ImportCsv,
@@ -377,6 +409,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::EditContact => Message::EditContact,
             MenuAction::Delete => Message::DeleteRequested,
             MenuAction::SelectAll => Message::SelectAll,
+            MenuAction::Duplicates => Message::ReviewDuplicates,
             MenuAction::Search => Message::FocusSearch,
             MenuAction::Import => Message::ImportRequested,
             MenuAction::ImportCsv => Message::ImportCsvRequested,
@@ -455,6 +488,13 @@ impl cosmic::Application for AppModel {
                 (None, Some(why.to_string()))
             }
         };
+        // The link store lives beside the books, under whichever root the
+        // store actually opened — so a sandboxed run links in its sandbox.
+        let contacts_root = store
+            .as_ref()
+            .map_or_else(cosmic_pim_core::store::contacts::default_root, |store| {
+                store.root().to_path_buf()
+            });
 
         // Shared with Slate: the same accounts.toml, the same keychain slots.
         // An account added in either app syncs for both.
@@ -474,6 +514,9 @@ impl cosmic::Application for AppModel {
             config,
             config_handler,
             store,
+            links: crate::links::LinkStore::open(&contacts_root),
+            folded: HashMap::new(),
+            review: None,
             accounts,
             account_form: None,
             syncing: false,
@@ -629,6 +672,7 @@ impl cosmic::Application for AppModel {
                     },
                     menu::Item::Divider,
                     menu::Item::Button(fl!("select-all"), None, MenuAction::SelectAll),
+                    menu::Item::Button(fl!("find-duplicates"), None, MenuAction::Duplicates),
                     menu::Item::Button(fl!("search-contacts"), None, MenuAction::Search),
                 ],
             ),
@@ -665,6 +709,8 @@ impl cosmic::Application for AppModel {
     fn on_escape(&mut self) -> Task<Self::Message> {
         if self.dialog.is_some() {
             self.dialog = None;
+        } else if self.review.is_some() {
+            self.review = None;
         } else if self.csv.is_some() {
             self.csv = None;
         } else if self.editor.is_some() {
@@ -831,16 +877,18 @@ impl cosmic::Application for AppModel {
             list_pane = list_pane.push(self.action_bar());
         }
 
+        // The selected row's cards, composed into one person. Built here
+        // rather than inside the closure because the renderer clones what it
+        // draws — the element does not borrow this, so a local is enough.
+        let cards = self.selected_cards();
+        let person = crate::ui::person::compose(&cards);
+
         let detail_or_placeholder = |show_back: bool| -> Element<'_, Message> {
-            match self.selected_contact() {
-                Some(contact) => {
+            match &person {
+                Some(person) => {
                     let detail = crate::ui::list::detail(
-                        contact,
-                        self.store
-                            .as_ref()
-                            .and_then(|s| s.book(&contact.addressbook_id))
-                            .map(|b| b.name.as_str()),
-                        self.photos.get(&ContactKey::of(contact)),
+                        person,
+                        self.photos.get(&ContactKey::of(person.head)),
                     );
                     if show_back {
                         widget::column::with_capacity(2)
@@ -871,17 +919,21 @@ impl cosmic::Application for AppModel {
         // window outright (they carry their own cancel), then a selected
         // contact's detail with a back button, then the list.
         let content: Element<'_, Message> = if collapsed {
-            match (&self.csv, &self.editor) {
-                (Some(state), _) => self.csv_pane(state),
-                (None, Some(state)) => self.editor_pane(state),
-                (None, None) if self.selected_contact().is_some() => detail_or_placeholder(true),
-                (None, None) => list_pane.width(Length::Fill).into(),
+            match (&self.review, &self.csv, &self.editor) {
+                (Some(review), _, _) => self.review_pane(review),
+                (None, Some(state), _) => self.csv_pane(state),
+                (None, None, Some(state)) => self.editor_pane(state),
+                (None, None, None) if self.selected_contact().is_some() => {
+                    detail_or_placeholder(true)
+                }
+                (None, None, None) => list_pane.width(Length::Fill).into(),
             }
         } else {
-            let right: Element<'_, Message> = match (&self.csv, &self.editor) {
-                (Some(state), _) => self.csv_pane(state),
-                (None, Some(state)) => self.editor_pane(state),
-                (None, None) => detail_or_placeholder(false),
+            let right: Element<'_, Message> = match (&self.review, &self.csv, &self.editor) {
+                (Some(review), _, _) => self.review_pane(review),
+                (None, Some(state), _) => self.csv_pane(state),
+                (None, None, Some(state)) => self.editor_pane(state),
+                (None, None, None) => detail_or_placeholder(false),
             };
             widget::row::with_capacity(3)
                 .push(list_pane.width(Length::Fixed(320.0)))
@@ -1133,7 +1185,7 @@ impl cosmic::Application for AppModel {
                 // key bindings are not routed through the menu — without this
                 // guard Ctrl+N mid-edit would replace the editor's state and
                 // silently discard whatever had been typed.
-                if self.editor.is_some() || self.csv.is_some() {
+                if self.editor.is_some() || self.csv.is_some() || self.review.is_some() {
                     return Task::none();
                 }
                 let Some(store) = self.store.as_ref() else {
@@ -1160,7 +1212,7 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::EditContact => {
-                if self.editor.is_some() || self.csv.is_some() {
+                if self.editor.is_some() || self.csv.is_some() || self.review.is_some() {
                     return Task::none();
                 }
                 let Some(contact) = self.selected_contact().cloned() else {
@@ -1343,6 +1395,99 @@ impl cosmic::Application for AppModel {
             }
             Message::DialogCancelled => {}
             Message::DialogFailed(why) => return self.toast(why),
+
+            Message::Unlink(key) => {
+                if let Err(why) = self.links.unlink(&key.book, &key.uid) {
+                    return self.toast(why);
+                }
+                // The card that just came out becomes its own row again, and
+                // selecting it is what makes that visible.
+                self.reload();
+                self.selected = Some(key);
+            }
+            Message::LinkChecked => {
+                if self.checked.len() < 2 {
+                    return self.toast(fl!("link-needs-two"));
+                }
+                // In list order, so the topmost row becomes the precedence
+                // head — the one the user sees first is the one that wins.
+                let cards: Vec<crate::links::CardRef> = self
+                    .contacts
+                    .iter()
+                    .map(ContactKey::of)
+                    .filter(|key| self.checked.contains(key))
+                    .map(|key| crate::links::CardRef {
+                        book: key.book,
+                        uid: key.uid,
+                    })
+                    .collect();
+                let count = cards.len();
+                let head = cards.first().cloned();
+                if let Err(why) = self.links.link(cards) {
+                    return self.toast(why);
+                }
+                self.selecting = false;
+                self.checked.clear();
+                self.reload();
+                self.selected = head.map(|card| ContactKey {
+                    book: card.book,
+                    uid: card.uid,
+                });
+                return self.toast(fl!("linked-count", count = count));
+            }
+            Message::ReviewDuplicates => {
+                if self.editor.is_some() || self.csv.is_some() || self.review.is_some() {
+                    return Task::none();
+                }
+                let Some(store) = self.store.as_ref() else {
+                    return Task::none();
+                };
+                // Over the whole address book, not the filtered list: a
+                // duplicate the current filter hides is still a duplicate.
+                let all: Vec<Contact> = store
+                    .contacts()
+                    .into_iter()
+                    .filter(|c| !self.config.is_hidden(&c.addressbook_id))
+                    .collect();
+                let candidates = crate::dedupe::candidates(&all, &self.links);
+                if candidates.is_empty() {
+                    return self.toast(fl!("no-duplicates"));
+                }
+                self.review = Some(Review {
+                    candidates,
+                    cards: all,
+                });
+            }
+            Message::ReviewLink(index) => {
+                let Some(candidate) = self
+                    .review
+                    .as_ref()
+                    .and_then(|review| review.candidates.get(index))
+                    .cloned()
+                else {
+                    return Task::none();
+                };
+                if let Err(why) = self.links.link(vec![candidate.a, candidate.b]) {
+                    return self.toast(why);
+                }
+                self.take_reviewed(index);
+                self.reload();
+            }
+            Message::ReviewIgnore(index) => {
+                let Some(candidate) = self
+                    .review
+                    .as_ref()
+                    .and_then(|review| review.candidates.get(index))
+                    .cloned()
+                else {
+                    return Task::none();
+                };
+                if let Err(why) = self.links.ignore(candidate.a, candidate.b) {
+                    return self.toast(why);
+                }
+                self.take_reviewed(index);
+            }
+            Message::ReviewClose => self.review = None,
 
             Message::ExportSelectedRequested => {
                 if self.checked.is_empty() {
@@ -1676,6 +1821,8 @@ impl AppModel {
             self.contacts.retain(|c| member_uids.contains(&c.uid));
         }
 
+        self.fold_links();
+
         if self.config.sort_by_given_name {
             self.contacts.sort_by_key(|c| {
                 (
@@ -1716,6 +1863,95 @@ impl AppModel {
                 Some(cosmic_pim_core::vcard::Photo::Uri(_)) | None => {}
             }
         }
+    }
+
+    /// Collapses every linked person in the list down to one row.
+    ///
+    /// The row that survives is the person's precedence head — the first card
+    /// in the link record that the current filter left visible, so filtering
+    /// to one book still shows that book's card rather than nothing. The
+    /// others move to `folded`, where the detail pane composes them back in.
+    fn fold_links(&mut self) {
+        self.folded.clear();
+        if self.links.persons().is_empty() {
+            return;
+        }
+
+        // Head per person: first card in record order that is actually here.
+        let mut heads: HashMap<String, ContactKey> = HashMap::new();
+        for person in self.links.persons() {
+            if let Some(card) = person.cards.iter().find(|card| {
+                self.contacts
+                    .iter()
+                    .any(|c| c.addressbook_id == card.book && c.uid == card.uid)
+            }) {
+                heads.insert(
+                    person.id.clone(),
+                    ContactKey {
+                        book: card.book.clone(),
+                        uid: card.uid.clone(),
+                    },
+                );
+            }
+        }
+
+        let mut kept = Vec::with_capacity(self.contacts.len());
+        for contact in std::mem::take(&mut self.contacts) {
+            let key = ContactKey::of(&contact);
+            let head = self
+                .links
+                .person_of(&key.book, &key.uid)
+                .and_then(|person| heads.get(&person.id));
+            match head {
+                Some(head) if *head != key => {
+                    self.folded.entry(head.clone()).or_default().push(contact);
+                }
+                _ => kept.push(contact),
+            }
+        }
+        self.contacts = kept;
+
+        // A selection that just became a folded member follows its head,
+        // rather than leaving the detail pane empty.
+        if let Some(selected) = self.selected.clone()
+            && !self.contacts.iter().any(|c| selected.matches(c))
+            && let Some(person) = self.links.person_of(&selected.book, &selected.uid)
+            && let Some(head) = heads.get(&person.id)
+        {
+            self.selected = Some(head.clone());
+        }
+    }
+
+    /// The cards behind the selected row, head first, each with its book's
+    /// display name — what [`crate::ui::person::compose`] reads.
+    fn selected_cards(&self) -> Vec<(&Contact, &str)> {
+        let Some(head) = self.selected_contact() else {
+            return Vec::new();
+        };
+        let book_name = |contact: &Contact| {
+            self.store
+                .as_ref()
+                .and_then(|store| store.book(&contact.addressbook_id))
+                .map_or("", |book| book.name.as_str())
+        };
+
+        let mut cards = vec![(head, book_name(head))];
+        if let Some(others) = self.folded.get(&ContactKey::of(head)) {
+            // Record order, not list order: precedence is what the user chose
+            // when linking, and the fold preserved it.
+            let person = self.links.person_of(&head.addressbook_id, &head.uid);
+            let position = |contact: &Contact| {
+                person.and_then(|person| {
+                    person.cards.iter().position(|card| {
+                        card.book == contact.addressbook_id && card.uid == contact.uid
+                    })
+                })
+            };
+            let mut others: Vec<&Contact> = others.iter().collect();
+            others.sort_by_key(|c| position(c).unwrap_or(usize::MAX));
+            cards.extend(others.into_iter().map(|c| (c, book_name(c))));
+        }
+        cards
     }
 
     fn selected_contact(&self) -> Option<&Contact> {
@@ -1918,21 +2154,44 @@ impl AppModel {
         let mut group = widget::button::standard(fl!("add-to-group"));
         let mut export = widget::button::standard(fl!("export"));
         let mut delete = widget::button::destructive(fl!("delete"));
+        // Linking needs two rows to be a question at all.
+        let mut link = widget::button::standard(fl!("link"));
         if count > 0 {
             group = group.on_press(Message::AddToGroupRequested);
             export = export.on_press(Message::ExportSelectedRequested);
             delete = delete.on_press(Message::DeleteRequested);
+        }
+        if count > 1 {
+            link = link.on_press(Message::LinkChecked);
         }
 
         widget::column::with_capacity(2)
             .spacing(spacing.space_xxs)
             .push(widget::text::caption(fl!("selected-count", count = count)))
             .push(
-                widget::flex_row(vec![group.into(), export.into(), delete.into()])
-                    .spacing(spacing.space_xxs)
-                    .row_spacing(spacing.space_xxs),
+                widget::flex_row(vec![
+                    link.into(),
+                    group.into(),
+                    export.into(),
+                    delete.into(),
+                ])
+                .spacing(spacing.space_xxs)
+                .row_spacing(spacing.space_xxs),
             )
             .into()
+    }
+
+    /// Drops a reviewed pair, closing the screen when it was the last one —
+    /// an empty review screen is a screen with nothing to say.
+    fn take_reviewed(&mut self, index: usize) {
+        if let Some(review) = self.review.as_mut() {
+            if index < review.candidates.len() {
+                review.candidates.remove(index);
+            }
+            if review.candidates.is_empty() {
+                self.review = None;
+            }
+        }
     }
 
     fn writable_books(&self) -> Vec<CalendarMeta> {
@@ -2295,6 +2554,70 @@ impl AppModel {
         ))
     }
 
+    /// The duplicate review pane, with its own header and close button.
+    fn review_pane<'a>(&'a self, review: &'a Review) -> Element<'a, Message> {
+        let spacing = cosmic::theme::spacing();
+
+        let bar = widget::row::with_capacity(3)
+            .align_y(cosmic::iced::Alignment::Center)
+            .spacing(spacing.space_xs)
+            .push(widget::text::title4(fl!("review-duplicates")))
+            .push(widget::text::caption(fl!(
+                "review-remaining",
+                count = review.candidates.len()
+            )))
+            .push(widget::Space::new().width(Length::Fill))
+            .push(widget::button::standard(fl!("close")).on_press(Message::ReviewClose));
+
+        // Resolve each pair's cards here: the screen has no store, and a card
+        // deleted underneath it simply stops being drawn.
+        let resolved: Vec<Option<(crate::ui::review::Side<'_>, crate::ui::review::Side<'_>)>> =
+            review
+                .candidates
+                .iter()
+                .map(|candidate| {
+                    Some((
+                        self.side(review, &candidate.a)?,
+                        self.side(review, &candidate.b)?,
+                    ))
+                })
+                .collect();
+
+        widget::column::with_capacity(2)
+            .spacing(spacing.space_s)
+            .padding(spacing.space_s)
+            .push(bar)
+            .push(crate::ui::review::view(
+                &review.candidates,
+                &resolved,
+                Message::ReviewLink,
+                Message::ReviewIgnore,
+            ))
+            .into()
+    }
+
+    /// One side of a review pair, resolved against the loaded books.
+    fn side<'a>(
+        &'a self,
+        review: &'a Review,
+        card: &crate::links::CardRef,
+    ) -> Option<crate::ui::review::Side<'a>> {
+        // From the screen's own snapshot, not the filtered list: review works
+        // over the whole address book, and the list may be showing one book.
+        let contact = review
+            .cards
+            .iter()
+            .find(|c| c.addressbook_id == card.book && c.uid == card.uid)?;
+        Some(crate::ui::review::Side {
+            contact,
+            book: self
+                .store
+                .as_ref()
+                .and_then(|store| store.book(&card.book))
+                .map_or("", |book| book.name.as_str()),
+        })
+    }
+
     /// The CSV mapping pane, with its own import/cancel bar.
     fn csv_pane<'a>(&'a self, state: &'a csv::State) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
@@ -2338,10 +2661,31 @@ impl AppModel {
             save = save.on_press(Message::EditorSave);
         }
 
-        let bar = widget::row::with_capacity(4)
+        let mut bar = widget::row::with_capacity(5)
             .align_y(cosmic::iced::Alignment::Center)
             .spacing(spacing.space_xs)
-            .push(widget::text::title4(title))
+            .push(widget::text::title4(title));
+
+        // Editing a linked person edits exactly one of its cards — the head.
+        // Saying which one is not decoration: the detail pane showed values
+        // from several books, and only this card's are in the fields below.
+        if !state.is_new
+            && self
+                .links
+                .person_of(&state.contact.addressbook_id, &state.contact.uid)
+                .is_some()
+            && let Some(book) = self
+                .store
+                .as_ref()
+                .and_then(|store| store.book(&state.contact.addressbook_id))
+        {
+            bar = bar.push(
+                widget::text::caption(fl!("editing-card", book = book.name.clone()))
+                    .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
+            );
+        }
+
+        let bar = bar
             .push(widget::Space::new().width(Length::Fill))
             .push(widget::button::standard(fl!("cancel")).on_press(Message::EditorCancel))
             .push(save);

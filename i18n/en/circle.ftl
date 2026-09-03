@@ -232,3 +232,28 @@ added-to-group = Added { $count } to { $name }.
 confirm-delete-many-title = Delete { $count } contacts?
 deleted-one = Deleted { $name }.
 deleted-many = Deleted { $count } contacts.
+
+## Linking and duplicates
+
+link = Link
+unlink = Unlink
+linked-cards = Linked cards
+link-needs-two = Pick at least two contacts to link.
+linked-count = Linked { $count } cards into one person.
+unlinked = { $name } is its own contact again.
+find-duplicates = Find duplicates…
+no-duplicates = No possible duplicates found.
+review-duplicates = Possible duplicates
+review-remaining = { $count ->
+        [one] One pair to review
+       *[other] { $count } pairs to review
+    }
+review-explains-linking =
+    Linking keeps both cards exactly as they are and shows them as one person.
+    Each card goes on syncing to its own account.
+match-email = Both have { $value }
+match-phone = Both have { $value }
+match-name = The names look alike — a guess, not evidence
+not-the-same = Not the same
+close = Close
+editing-card = Editing the card in { $book }

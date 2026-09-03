@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Linking.** The same person in two accounts can be shown as one entry:
+  tick both rows and press Link, or let Find duplicates propose them. The
+  detail pane composes every card underneath — a shared address appears once,
+  each value says which book it came from, and the linked cards are listed
+  with an Unlink beside each. Nothing is merged: the cards stay byte for byte
+  as they were and go on syncing to their own servers, so unlinking loses
+  nothing. Links live in `.links/` beside the address books, invisible to the
+  vdir layer and never pushed to a server.
+- **Duplicate review** (Edit → Find duplicates). Candidates come from a
+  shared address, a shared number across spellings, or names that
+  transliterate alike (Γιώργος ↔ Giorgos — shown as a guess, not evidence).
+  Each pair is reviewed side by side with the reason spelled out; the answers
+  are Link or Not the same, and a dismissal is remembered. There is
+  deliberately no merge button.
+
 - Selection mode: the Select button beside the search field (or Ctrl+click,
   Shift+click for a range, Ctrl+A for everything) ticks rows, and the bar
   under the list deletes, exports, or adds the set to a group in one go.
