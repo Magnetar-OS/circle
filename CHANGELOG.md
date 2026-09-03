@@ -92,3 +92,13 @@ All notable changes to this project are documented here. The format follows
 - Copy buttons and selectable text on every value in the detail pane.
 - Live reload when anything else — a sync run, `khard`, an editor — changes
   the address book on disk.
+
+### Fixed
+
+- The English catalogue defined twenty message ids twice, so half of the
+  Accounts page's strings were silently shadowed by an older set. Deduplicated,
+  and `tests/catalogues.rs` now fails the build on a repeated id, a missing
+  translation, or one the application no longer uses.
+- Every icon-only button — the mail, call, and browser actions, the remove
+  buttons in the editor, and the back button in the narrow layout — now has a
+  tooltip. An icon alone is not a name.

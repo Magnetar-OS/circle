@@ -16,26 +16,29 @@ Contacts deliberately lacks (groups, printing, LDAP, smart lists). The CRM
 tier (03 §7) is the layer none of them have — the differentiator, not the
 baseline.
 
-Where Circle already stands against GNOME Contacts:
+Where Circle stands against GNOME Contacts. This table was the gap list the
+plan below was built from; it is kept as written, with the column on the
+right updated as each row closed. [PARITY.md](PARITY.md) is the fuller audit.
 
-| Capability | GNOME Contacts | Circle today |
+| Capability | GNOME Contacts | Circle |
 |---|---|---|
 | Browse / search / detail | yes | yes — plus punctuation-insensitive phone search |
 | Create / edit / delete | yes | yes — byte-preserving patches, which GNOME does not do |
-| Photos | select, crop, generated initials | display, set/replace/remove; no crop, no generated avatars |
-| Address books | local + online accounts, in-app | local vdir; accounts exist in `accounts.toml` but no in-app UI |
-| Sync | EDS does it underneath | external only (`vdirsyncer`); `cosmic-pim-sync` not yet wired in |
+| Photos | select, crop, generated initials | yes — crop and downscale on set, generated initials everywhere |
+| Address books | local + online accounts, in-app | yes — vdir plus the suite's shared accounts, in-app |
+| Sync | EDS does it underneath | yes — CardDAV on demand or on a cadence, with write-back queueing |
 | Import / export vCard | yes | yes — UID-keyed re-import, verbatim export |
-| Linking duplicates | yes, with suggestions | no (03 §5–6) |
-| Bulk selection (delete, export, link) | yes | no |
-| Share as QR code | yes | no |
-| Adaptive narrow layout | yes (single pane on phones) | no — three panes always |
-| Groups | **no** | yes — `CATEGORIES` (Circle is ahead) |
+| Linking duplicates | yes, with suggestions | yes — and unlinking restores both cards byte for byte |
+| Bulk selection (delete, export, link) | yes | yes — plus add-to-group |
+| Share as QR code | yes | yes |
+| Adaptive narrow layout | yes (single pane on phones) | yes — collapses at 640 px, usable to 360 px |
+| Groups | **no** | yes — `CATEGORIES` *and* `KIND:group` cards |
 | Birthday | yes | yes |
+| CSV import | **no** | yes — with an explicit column-mapping screen |
+| Text a contact | **no** | yes, through KDE Connect where it is running |
 
-So the parity gap is concrete and finite: **accounts+sync UI, linking,
-avatars, bulk selection, QR share, adaptive layout.** Everything else is
-polish, integration, or beyond-parity.
+Baseline parity is closed. What remains is beyond-parity work (the CRM tier,
+printing, LDAP) and the release engineering listed under Milestones.
 
 ---
 
@@ -189,14 +192,45 @@ launcher plugin). What remains:
 Each milestone is releasable and tagged; Track B/C/D work is folded into
 whichever milestone touches that surface.
 
-| Version | Theme | Contents |
-|---|---|---|
-| **0.2** | Sync in the open | A1 accounts+sync UI · A2 avatars · toolchain/rustfmt files · unused-deps resolved |
-| **0.3** | Many at once | A3 bulk selection · adaptive layout · undo-toast delete · keyboard-first pass |
-| **0.4** | One person, many cards | A4 linking + duplicate review · re-profile list, window it only if measured |
-| **0.5** | In and out | A5 QR · CSV import · KDE Connect handoff · A6 groups (if quirks table ready) |
-| **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live |
-| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP |
+| Version | Theme | Contents | State |
+|---|---|---|---|
+| **0.2** | Sync in the open | A1 accounts+sync UI · A2 avatars · toolchain/rustfmt files · unused-deps resolved | **done** |
+| **0.3** | Many at once | A3 bulk selection · adaptive layout · undo-toast delete · keyboard-first pass | **done** |
+| **0.4** | One person, many cards | A4 linking + duplicate review · re-profile list, window it only if measured | **done** — profiling deferred, see below |
+| **0.5** | In and out | A5 QR · CSV import · KDE Connect handoff · A6 groups (if quirks table ready) | **done** |
+| **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live | mostly — see below |
+| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | not started |
+
+### What 1.0 still wants
+
+Everything in Track A is built and the parity table above is closed. Four
+things remain, none of them code this repository can write on its own:
+
+- **Screenshots for the metainfo.** They have to be taken on a running
+  COSMIC session and committed as files a software centre can fetch. The
+  `<branding>` colours and the release entry are already in place.
+- **Weblate onboarding.** The layout is what Weblate expects and there are
+  now two languages in it, which is the precondition; the rest is a project
+  configured on the hosted instance.
+- **A signed-off conventions audit** — a pass over
+  [cosmic-conventions.md](cosmic-conventions.md)'s checklist recorded in a
+  document, rather than the item-by-item fixes made so far.
+- **Per-size icons.** Circle installs one `scalable/apps/*.svg`, which
+  resolves everywhere; the first-party apps ship one SVG per size so small
+  sizes sit on the pixel grid. That is a design pass, not a build change.
+
+### Deferred deliberately
+
+- **List profiling and windowed rendering.** The 0.4 exit criterion was to
+  re-profile once linking multiplies reads per row and to add windowing
+  *only if measurement demands it*. Composition happens once per selection,
+  not per row — the list still renders one card per row — so the trigger has
+  not fired. Measure against a few thousand contacts before changing this.
+- **KDE Connect against a live daemon.** The URI and object-path
+  construction are tested and the absent case is pinned, but nothing has run
+  against a real KDE Connect: it is not installed on the development
+  machine. Treat the send path as unverified until someone with a paired
+  phone tries it.
 
 ## Non-goals (unchanged from 03)
 
