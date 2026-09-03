@@ -16,6 +16,16 @@ All notable changes to this project are documented here. The format follows
   as they were and go on syncing to their own servers, so unlinking loses
   nothing. Links live in `.links/` beside the address books, invisible to the
   vdir layer and never pushed to a server.
+- **Share as a QR code** (Edit → Share). A phone camera reads it straight
+  into its own address book — no network, no account, no cable. The payload
+  is rebuilt from the fields a phone files rather than copied from the card,
+  because a real card with a photo is far past what a QR code can hold; a
+  linked person's numbers all travel.
+- **Texting through a paired phone.** Where KDE Connect is running with a
+  device in reach, phone numbers gain a text button that hands the message to
+  the phone. The button is absent otherwise rather than silently doing
+  nothing, and nothing else in Circle depends on KDE Connect being installed.
+  Placing calls stays with the desktop's own `tel:` handler.
 - **Duplicate review** (Edit → Find duplicates). Candidates come from a
   shared address, a shared number across spellings, or names that
   transliterate alike (Γιώργος ↔ Giorgos — shown as a guess, not evidence).

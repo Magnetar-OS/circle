@@ -103,8 +103,17 @@ Reading, searching, creating, editing, and deleting contacts all work.
   Map a column to Unique ID and re-importing the same file updates contacts
   instead of duplicating them.
 
-Not yet: KDE Connect click-to-call (the `tel:` buttons already reach it via
-the desktop handler when it is installed) — see [03-circle.md](03-circle.md).
+- **Share as a QR code.** A phone camera reads the contact straight into its
+  own address book. The code carries a rebuilt vCard 3.0 — name, numbers,
+  addresses, organisation, websites — because a stored card with a photo is
+  far past a QR code's capacity; the card on disk is untouched.
+- **Texting through KDE Connect.** With the daemon running and a phone in
+  reach, numbers gain a text button. Absent otherwise: a button that silently
+  does nothing is worse than one that is not there. Calls stay with the
+  desktop's `tel:` handler, which is the supported path.
+
+Everything in [03-circle.md](03-circle.md)'s parity tiers is now built; the
+CRM layer (§7) and LDAP (§8) are the remaining beyond-parity work.
 
 ## Building
 

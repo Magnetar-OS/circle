@@ -12,6 +12,7 @@ pub mod app;
 pub mod config;
 pub mod dedupe;
 pub mod i18n;
+pub mod kdeconnect;
 pub mod key_bind;
 pub mod links;
 pub mod ui;

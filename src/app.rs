@@ -168,6 +168,10 @@ pub struct AppModel {
     /// with the editor and the CSV mapper — all three claim the right-hand
     /// pane.
     review: Option<Review>,
+    /// Paired, reachable phones, found once at start-up. Empty when KDE
+    /// Connect is not installed or nothing is in range, which is the normal
+    /// case — the SMS action simply is not offered.
+    phones: Vec<crate::kdeconnect::Device>,
     /// Accounts and credentials, shared with Slate — one `accounts.toml` for
     /// the whole suite. `None` when the account store could not be opened; the
     /// address book still works, it just cannot sync.
@@ -291,6 +295,17 @@ enum Dialog {
     AddToGroup {
         name: String,
     },
+    /// The QR code for one person, for a phone camera to read.
+    Share {
+        key: ContactKey,
+    },
+    /// Writing a text for a paired phone to send.
+    Sms {
+        number: String,
+        body: String,
+        /// The daemon has been asked and has not answered yet.
+        sending: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -355,6 +370,12 @@ pub enum Message {
     DialogCancel,
 
     Unlink(ContactKey),
+    ShareRequested,
+    PhonesFound(Vec<crate::kdeconnect::Device>),
+    SmsRequested(String),
+    SmsBody(String),
+    SmsSend,
+    SmsSent(Option<String>),
     LinkChecked,
     ReviewDuplicates,
     ReviewLink(usize),
@@ -388,6 +409,7 @@ pub enum MenuAction {
     Delete,
     SelectAll,
     Duplicates,
+    Share,
     Search,
     Import,
     ImportCsv,
@@ -410,6 +432,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::Delete => Message::DeleteRequested,
             MenuAction::SelectAll => Message::SelectAll,
             MenuAction::Duplicates => Message::ReviewDuplicates,
+            MenuAction::Share => Message::ShareRequested,
             MenuAction::Search => Message::FocusSearch,
             MenuAction::Import => Message::ImportRequested,
             MenuAction::ImportCsv => Message::ImportCsvRequested,
@@ -515,6 +538,7 @@ impl cosmic::Application for AppModel {
             config_handler,
             store,
             links: crate::links::LinkStore::open(&contacts_root),
+            phones: Vec::new(),
             folded: HashMap::new(),
             review: None,
             accounts,
@@ -546,7 +570,15 @@ impl cosmic::Application for AppModel {
 
         // Start-up requests from the command line: `.vcf` paths to import, and
         // the desktop entry's "New Contact" action.
-        let mut tasks = vec![model.update_title()];
+        let mut tasks = vec![
+            model.update_title(),
+            // Ask once whether a phone is in reach. Off the UI thread, and
+            // absent-friendly: no daemon means an empty list and no SMS
+            // button, not an error.
+            cosmic::task::future(async {
+                Message::PhonesFound(crate::kdeconnect::devices().await)
+            }),
+        ];
         for path in flags.import {
             tasks.push(cosmic::task::message(cosmic::Action::App(
                 Message::ImportPath(path),
@@ -670,6 +702,11 @@ impl cosmic::Application for AppModel {
                     } else {
                         menu::Item::ButtonDisabled(fl!("delete-contact"), None, MenuAction::Delete)
                     },
+                    if can_edit {
+                        menu::Item::Button(fl!("share-contact"), None, MenuAction::Share)
+                    } else {
+                        menu::Item::ButtonDisabled(fl!("share-contact"), None, MenuAction::Share)
+                    },
                     menu::Item::Divider,
                     menu::Item::Button(fl!("select-all"), None, MenuAction::SelectAll),
                     menu::Item::Button(fl!("find-duplicates"), None, MenuAction::Duplicates),
@@ -768,6 +805,47 @@ impl cosmic::Application for AppModel {
                             .on_submit(|_| Message::NewGroupConfirmed),
                     )
                     .primary_action(create)
+                    .secondary_action(
+                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    )
+                    .into()
+            }
+            Dialog::Share { key } => {
+                // Composed, so a linked person's numbers all travel — the
+                // point of sharing is handing over everything you know.
+                let cards = self.cards_for(key);
+                let person = crate::ui::person::compose(&cards)?;
+                widget::dialog()
+                    .title(fl!("share-contact"))
+                    .body(person.label.clone())
+                    .control(crate::ui::share::view::<Message>(&person))
+                    .primary_action(
+                        widget::button::standard(fl!("close")).on_press(Message::DialogCancel),
+                    )
+                    .into()
+            }
+            Dialog::Sms {
+                number,
+                body,
+                sending,
+            } => {
+                let phone = self
+                    .phones
+                    .first()
+                    .map_or_else(String::new, |p| p.name.clone());
+                let mut send = widget::button::suggested(fl!("send"));
+                if !body.trim().is_empty() && !*sending {
+                    send = send.on_press(Message::SmsSend);
+                }
+                widget::dialog()
+                    .title(fl!("sms-to", number = number.clone()))
+                    .body(fl!("sms-via", device = phone))
+                    .control(
+                        widget::text_input(fl!("sms-body"), body)
+                            .on_input(Message::SmsBody)
+                            .on_submit(|_| Message::SmsSend),
+                    )
+                    .primary_action(send)
                     .secondary_action(
                         widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
                     )
@@ -889,6 +967,7 @@ impl cosmic::Application for AppModel {
                     let detail = crate::ui::list::detail(
                         person,
                         self.photos.get(&ContactKey::of(person.head)),
+                        !self.phones.is_empty(),
                     );
                     if show_back {
                         widget::column::with_capacity(2)
@@ -1396,6 +1475,72 @@ impl cosmic::Application for AppModel {
             Message::DialogCancelled => {}
             Message::DialogFailed(why) => return self.toast(why),
 
+            Message::ShareRequested => {
+                if let Some(contact) = self.selected_contact() {
+                    self.dialog = Some(Dialog::Share {
+                        key: ContactKey::of(contact),
+                    });
+                }
+            }
+            Message::PhonesFound(phones) => {
+                if !phones.is_empty() {
+                    tracing::info!(count = phones.len(), "KDE Connect devices in reach");
+                }
+                self.phones = phones;
+            }
+            Message::SmsRequested(number) => {
+                if self.phones.is_empty() {
+                    return Task::none();
+                }
+                self.dialog = Some(Dialog::Sms {
+                    number,
+                    body: String::new(),
+                    sending: false,
+                });
+            }
+            Message::SmsBody(text) => {
+                if let Some(Dialog::Sms { body, .. }) = self.dialog.as_mut() {
+                    *body = text;
+                }
+            }
+            Message::SmsSend => {
+                let Some(Dialog::Sms {
+                    number,
+                    body,
+                    sending,
+                }) = self.dialog.as_mut()
+                else {
+                    return Task::none();
+                };
+                if body.trim().is_empty() || *sending {
+                    return Task::none();
+                }
+                // The dialog stays up, disabled, until the daemon answers:
+                // closing it on send would leave a failure with nowhere to
+                // appear and the typed message gone.
+                *sending = true;
+                let (number, body) = (number.clone(), body.clone());
+                let Some(device) = self.phones.first().map(|phone| phone.id.clone()) else {
+                    return Task::none();
+                };
+                return cosmic::task::future(async move {
+                    Message::SmsSent(
+                        crate::kdeconnect::send_sms(&device, &number, &body)
+                            .await
+                            .err(),
+                    )
+                });
+            }
+            Message::SmsSent(error) => {
+                if let Some(why) = error {
+                    if let Some(Dialog::Sms { sending, .. }) = self.dialog.as_mut() {
+                        *sending = false;
+                    }
+                    return self.toast(fl!("sms-failed", why = why));
+                }
+                self.dialog = None;
+                return self.toast(fl!("sms-sent"));
+            }
             Message::Unlink(key) => {
                 if let Err(why) = self.links.unlink(&key.book, &key.uid) {
                     return self.toast(why);
@@ -1925,7 +2070,15 @@ impl AppModel {
     /// The cards behind the selected row, head first, each with its book's
     /// display name — what [`crate::ui::person::compose`] reads.
     fn selected_cards(&self) -> Vec<(&Contact, &str)> {
-        let Some(head) = self.selected_contact() else {
+        match self.selected.as_ref() {
+            Some(key) => self.cards_for(key),
+            None => Vec::new(),
+        }
+    }
+
+    /// [`Self::selected_cards`] for any row, not just the selected one.
+    fn cards_for(&self, key: &ContactKey) -> Vec<(&Contact, &str)> {
+        let Some(head) = self.contacts.iter().find(|c| key.matches(c)) else {
             return Vec::new();
         };
         let book_name = |contact: &Contact| {

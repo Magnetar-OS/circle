@@ -9,6 +9,7 @@ pub mod editor;
 pub mod list;
 pub mod person;
 pub mod review;
+pub mod share;
 
 /// Dimmed secondary text, matching the rest of the suite.
 #[must_use]

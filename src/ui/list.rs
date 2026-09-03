@@ -2,9 +2,9 @@
 
 //! The contact list and the detail pane.
 
-use cosmic::Element;
 use cosmic::iced::core::text::{Ellipsize, EllipsizeHeightLimit};
 use cosmic::iced::{Alignment, Length};
+use cosmic::prelude::*;
 use cosmic::widget;
 use cosmic_pim_core::model::Contact;
 
@@ -128,6 +128,9 @@ fn row<'a>(
 pub fn detail<'a>(
     person: &crate::ui::person::Composed<'_>,
     photo: Option<&widget::image::Handle>,
+    // Whether a paired phone is in reach, which is what makes texting a
+    // number possible at all.
+    can_text: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(8).spacing(spacing.space_s);
@@ -166,7 +169,7 @@ pub fn detail<'a>(
     if !person.fields.is_empty() {
         let mut section = widget::settings::section();
         for field in &person.fields {
-            section = section.add(value_row(field));
+            section = section.add(value_row(field, can_text));
         }
         column = column.push(section);
     }
@@ -230,11 +233,11 @@ pub fn detail<'a>(
 
 /// One labelled, selectable, copyable value, optionally with an action button
 /// and the book it came from.
-fn value_row<'a>(field: &crate::ui::person::Field<'_>) -> Element<'a, Message> {
+fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let owned = field.value.clone();
 
-    let mut controls = widget::row::with_capacity(3)
+    let mut controls = widget::row::with_capacity(4)
         .align_y(Alignment::Center)
         .spacing(spacing.space_xxs)
         .push(widget::selectable_text::body(owned.clone()));
@@ -254,6 +257,20 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>) -> Element<'a, Message> {
         controls = controls.push(
             widget::button::icon(widget::icon::from_name(field.icon))
                 .on_press(Message::LaunchUrl(url.clone())),
+        );
+    }
+
+    // Texting is offered only when a paired phone is actually in reach: a
+    // button that silently does nothing is worse than one that is absent.
+    if can_text && let Some(number) = &field.number {
+        controls = controls.push(
+            widget::tooltip(
+                widget::button::icon(widget::icon::from_name("mail-message-new-symbolic"))
+                    .on_press(Message::SmsRequested(number.clone())),
+                widget::text::body(fl!("sms")),
+                widget::tooltip::Position::Top,
+            )
+            .apply(Element::from),
         );
     }
 

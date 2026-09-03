@@ -49,6 +49,15 @@ uuid = { version = "1", features = ["v4"] }
 # suggestions only — matches never auto-merge anything (03 §6).
 any_ascii = "0.3"
 strsim = "0.11"
+# Sharing a contact as a QR code. Default features off: the bundled image and
+# SVG renderers pull their own dependencies, and the matrix is all this needs
+# — the SVG is twenty lines and keeps the payload under our own control.
+qrcode = { version = "0.14", default-features = false }
+# KDE Connect handoff: asking the daemon which phone is reachable, and handing
+# it a number to dial or text. Already in the tree through libcosmic, and used
+# directly here for the same reason Slate does — the alternative is shelling
+# out to a CLI that may not be installed alongside the daemon.
+zbus = "5.19"
 # CSV import. RFC 4180 quoting — embedded commas, quotes, and newlines — is
 # exactly the kind of parser that looks trivial and is not; the boring crate
 # is the right answer.

@@ -33,6 +33,10 @@ pub struct Field<'a> {
     pub action: Option<String>,
     /// The icon for that action; empty when there is none.
     pub icon: &'static str,
+    /// The bare number, when this field is a phone — what an SMS is
+    /// addressed to. Set only for phones, so the renderer can offer texting
+    /// without re-deriving what kind of field it is looking at.
+    pub number: Option<String>,
     /// The book this value came from. `None` for an unlinked contact, where
     /// there is only one source and saying so would be noise.
     pub source: Option<&'a str>,
@@ -82,6 +86,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     value: email.value.clone(),
                     action: Some(format!("mailto:{}", email.value)),
                     icon: "mail-send-symbolic",
+                    number: None,
                     source: attribute(book),
                 });
             }
@@ -101,6 +106,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     // nothing happens, which is why the value stays copyable.
                     action: Some(format!("tel:{}", phone.value.replace(' ', ""))),
                     icon: "call-start-symbolic",
+                    number: Some(phone.value.clone()),
                     source: attribute(book),
                 });
             }
@@ -119,6 +125,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     value: line,
                     action: None,
                     icon: "",
+                    number: None,
                     source: attribute(book),
                 });
             }
@@ -132,6 +139,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     value: url.value.clone(),
                     action: Some(url.value.clone()),
                     icon: "web-browser-symbolic",
+                    number: None,
                     source: attribute(book),
                 });
             }
@@ -146,6 +154,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
             value: birthday.format("%-d %B %Y").to_string(),
             action: None,
             icon: "",
+            number: None,
             source: attribute(book),
         });
     }
@@ -158,6 +167,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
             value: contact.note.clone().unwrap_or_default(),
             action: None,
             icon: "",
+            number: None,
             source: attribute(book),
         });
     }
