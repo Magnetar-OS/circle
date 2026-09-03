@@ -5,10 +5,13 @@
 pub mod accounts;
 pub mod avatar;
 pub mod csv;
+pub mod dialogs;
 pub mod editor;
 pub mod list;
+pub mod menus;
 pub mod person;
 pub mod review;
+pub mod settings;
 pub mod share;
 
 /// Dimmed secondary text, matching the rest of the suite.

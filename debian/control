@@ -1,0 +1,37 @@
+Source: circle
+Section: utils
+Priority: optional
+Maintainer: entro314 labs <hey@myroomie.gr>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc (>= 1.98),
+ just,
+ pkg-config,
+ libssl-dev,
+ libxkbcommon-dev,
+Standards-Version: 4.7.0
+Homepage: https://github.com/entro314-labs/circle
+Rules-Requires-Root: no
+
+Package: circle
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Recommends:
+ vdirsyncer,
+Suggests:
+ kdeconnect,
+Description: Contacts for the COSMIC desktop
+ Circle is the contacts application for the COSMIC desktop. Contacts are plain
+ vCard files in a vdir layout, so they stay readable by khard, vdirsyncer, and
+ anything else that speaks .vcf.
+ .
+ Editing a contact patches the stored card rather than rebuilding it, so
+ photos, custom labels, and every property Circle does not itself display
+ survive an edit and a sync.
+ .
+ Accounts are shared with the rest of the suite: an account added in Slate is
+ already here, with one password in the system keyring rather than one per
+ application.

@@ -33,6 +33,10 @@
   <url type="vcs-browser">https://github.com/entro314-labs/circle</url>
   <launchable type="desktop-id">io.github.entro314labs.Circle.desktop</launchable>
   <provides>
+    <!-- How an application says it belongs to COSMIC. The desktop's own store
+         and app library filter on this id; without it Circle is an ordinary
+         Office application to them. -->
+    <id>com.system76.CosmicApplication</id>
     <binary>circle</binary>
   </provides>
   <requires>

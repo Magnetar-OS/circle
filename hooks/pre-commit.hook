@@ -1,0 +1,16 @@
+#!/bin/sh
+# Formatting only. Clippy and the tests belong in CI, where a slow check costs
+# nobody their train of thought; a commit hook that takes a minute is a hook
+# people learn to pass --no-verify to.
+#
+# Install with:  ln -s ../../hooks/pre-commit.hook .git/hooks/pre-commit
+#
+# Scoped to -p circle deliberately: `cargo fmt` with no package reformats the
+# sibling cosmic-pim checkout too, because it is a path dependency.
+set -e
+
+if ! cargo fmt -p circle -- --check; then
+    echo
+    echo "Formatting differs. Run 'just fmt' and stage the result." >&2
+    exit 1
+fi

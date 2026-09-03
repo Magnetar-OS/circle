@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use crate::config::Config;
 use crate::fl;
 use crate::ui::csv;
+use crate::ui::dialogs::Dialog;
 use crate::ui::editor;
 
 const APP_ID: &str = "io.github.entro314labs.Circle";
@@ -274,41 +275,6 @@ pub struct AccountForm {
 }
 
 #[derive(Clone, Debug)]
-enum Dialog {
-    /// Deleting several contacts at once — the one delete that still asks
-    /// first, because eight rows ticked over three books is easy to misread.
-    /// A single delete asks forgiveness instead: it happens immediately, with
-    /// an undo toast.
-    ConfirmDeleteMany {
-        keys: Vec<ContactKey>,
-    },
-    /// Deleting a group card — separate from a contact delete because the
-    /// body must say what is and is not lost (members stay).
-    ConfirmDeleteGroup {
-        key: ContactKey,
-        name: String,
-    },
-    NewGroup {
-        name: String,
-    },
-    /// Adding every checked contact to a `CATEGORIES` group by name.
-    AddToGroup {
-        name: String,
-    },
-    /// The QR code for one person, for a phone camera to read.
-    Share {
-        key: ContactKey,
-    },
-    /// Writing a text for a paired phone to send.
-    Sms {
-        number: String,
-        body: String,
-        /// The daemon has been asked and has not answered yet.
-        sending: bool,
-    },
-}
-
-#[derive(Clone, Debug)]
 pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
@@ -450,23 +416,6 @@ impl menu::action::MenuAction for MenuAction {
 fn search_id() -> widget::Id {
     widget::Id::new("search")
 }
-
-/// The background sync cadences the settings dropdown offers, in minutes.
-/// Position-matched to `sync_interval_labels`; `0` is "never".
-const SYNC_INTERVALS: [u32; 4] = [0, 15, 30, 60];
-
-/// The dropdown's labels. A `LazyLock` because `widget::dropdown` borrows its
-/// labels for the lifetime of the view, so they cannot be built inside
-/// `settings_view` — and resolved lazily because `fl!` needs the loader
-/// `main` initialises first.
-static SYNC_INTERVAL_LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
-    vec![
-        fl!("sync-off"),
-        fl!("sync-minutes", minutes = 15),
-        fl!("sync-minutes", minutes = 30),
-        fl!("sync-minutes", minutes = 60),
-    ]
-});
 
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
@@ -663,71 +612,10 @@ impl cosmic::Application for AppModel {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        let can_edit = self.selected.is_some() && self.editor.is_none();
-
-        let file = menu::Tree::with_children(
-            menu::root(fl!("file")).apply(Element::from),
-            menu::items(
-                &self.key_binds,
-                vec![
-                    menu::Item::Button(fl!("new-contact"), None, MenuAction::NewContact),
-                    menu::Item::Button(fl!("new-group"), None, MenuAction::NewGroup),
-                    menu::Item::Divider,
-                    menu::Item::Button(fl!("import"), None, MenuAction::Import),
-                    menu::Item::Button(fl!("import-csv"), None, MenuAction::ImportCsv),
-                    menu::Item::Button(fl!("export"), None, MenuAction::Export),
-                    menu::Item::Divider,
-                    menu::Item::Button(fl!("refresh"), None, MenuAction::Refresh),
-                    menu::Item::Button(fl!("sync-now"), None, MenuAction::SyncNow),
-                ],
-            ),
-        );
-
-        let edit = menu::Tree::with_children(
-            menu::root(fl!("edit")).apply(Element::from),
-            menu::items(
-                &self.key_binds,
-                vec![
-                    if can_edit {
-                        menu::Item::Button(fl!("edit-contact"), None, MenuAction::EditContact)
-                    } else {
-                        menu::Item::ButtonDisabled(
-                            fl!("edit-contact"),
-                            None,
-                            MenuAction::EditContact,
-                        )
-                    },
-                    if can_edit {
-                        menu::Item::Button(fl!("delete-contact"), None, MenuAction::Delete)
-                    } else {
-                        menu::Item::ButtonDisabled(fl!("delete-contact"), None, MenuAction::Delete)
-                    },
-                    if can_edit {
-                        menu::Item::Button(fl!("share-contact"), None, MenuAction::Share)
-                    } else {
-                        menu::Item::ButtonDisabled(fl!("share-contact"), None, MenuAction::Share)
-                    },
-                    menu::Item::Divider,
-                    menu::Item::Button(fl!("select-all"), None, MenuAction::SelectAll),
-                    menu::Item::Button(fl!("find-duplicates"), None, MenuAction::Duplicates),
-                    menu::Item::Button(fl!("search-contacts"), None, MenuAction::Search),
-                ],
-            ),
-        );
-
-        let view = menu::Tree::with_children(
-            menu::root(fl!("view")).apply(Element::from),
-            menu::items(
-                &self.key_binds,
-                vec![
-                    menu::Item::Button(fl!("accounts"), None, MenuAction::Accounts),
-                    menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
-                    menu::Item::Button(fl!("about"), None, MenuAction::About),
-                ],
-            ),
-        );
-
-        vec![menu::bar(vec![file, edit, view]).into()]
+        crate::ui::menus::bar(
+            &self.key_binds,
+            self.selected.is_some() && self.editor.is_none(),
+        )
     }
 
     fn nav_model(&self) -> Option<&nav_bar::Model> {
@@ -771,106 +659,20 @@ impl cosmic::Application for AppModel {
     }
 
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
-        Some(match self.dialog.as_ref()? {
-            Dialog::ConfirmDeleteMany { keys } => widget::dialog()
-                .title(fl!("confirm-delete-many-title", count = keys.len()))
-                .body(fl!("confirm-delete-body"))
-                .primary_action(
-                    widget::button::destructive(fl!("delete")).on_press(Message::DeleteConfirmed),
-                )
-                .secondary_action(
-                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
-                )
-                .into(),
-            Dialog::ConfirmDeleteGroup { name, .. } => widget::dialog()
-                .title(fl!("confirm-delete-title", name = name.clone()))
-                .body(fl!("confirm-delete-group-body"))
-                .primary_action(
-                    widget::button::destructive(fl!("delete")).on_press(Message::DeleteConfirmed),
-                )
-                .secondary_action(
-                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
-                )
-                .into(),
-            Dialog::NewGroup { name } => {
-                let mut create = widget::button::suggested(fl!("create"));
-                if !name.trim().is_empty() {
-                    create = create.on_press(Message::NewGroupConfirmed);
-                }
-                widget::dialog()
-                    .title(fl!("new-group"))
-                    .control(
-                        widget::text_input(fl!("group-name"), name)
-                            .on_input(Message::NewGroupName)
-                            .on_submit(|_| Message::NewGroupConfirmed),
-                    )
-                    .primary_action(create)
-                    .secondary_action(
-                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
-                    )
-                    .into()
-            }
-            Dialog::Share { key } => {
-                // Composed, so a linked person's numbers all travel — the
-                // point of sharing is handing over everything you know.
-                let cards = self.cards_for(key);
-                let person = crate::ui::person::compose(&cards)?;
-                widget::dialog()
-                    .title(fl!("share-contact"))
-                    .body(person.label.clone())
-                    .control(crate::ui::share::view::<Message>(&person))
-                    .primary_action(
-                        widget::button::standard(fl!("close")).on_press(Message::DialogCancel),
-                    )
-                    .into()
-            }
-            Dialog::Sms {
-                number,
-                body,
-                sending,
-            } => {
-                let phone = self
-                    .phones
-                    .first()
-                    .map_or_else(String::new, |p| p.name.clone());
-                let mut send = widget::button::suggested(fl!("send"));
-                if !body.trim().is_empty() && !*sending {
-                    send = send.on_press(Message::SmsSend);
-                }
-                widget::dialog()
-                    .title(fl!("sms-to", number = number.clone()))
-                    .body(fl!("sms-via", device = phone))
-                    .control(
-                        widget::text_input(fl!("sms-body"), body)
-                            .on_input(Message::SmsBody)
-                            .on_submit(|_| Message::SmsSend),
-                    )
-                    .primary_action(send)
-                    .secondary_action(
-                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
-                    )
-                    .into()
-            }
-            Dialog::AddToGroup { name } => {
-                let mut add = widget::button::suggested(fl!("add"));
-                if !name.trim().is_empty() {
-                    add = add.on_press(Message::AddToGroupConfirmed);
-                }
-                widget::dialog()
-                    .title(fl!("add-to-group-title", count = self.checked.len()))
-                    .body(fl!("add-to-group-body"))
-                    .control(
-                        widget::text_input(fl!("group-name"), name)
-                            .on_input(Message::AddToGroupName)
-                            .on_submit(|_| Message::AddToGroupConfirmed),
-                    )
-                    .primary_action(add)
-                    .secondary_action(
-                        widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
-                    )
-                    .into()
-            }
-        })
+        let dialog = self.dialog.as_ref()?;
+        // The two dialogs that need more than their own state get it here:
+        // the share code composes a person, and the SMS dialog names the
+        // phone it will go through.
+        let cards = match dialog {
+            Dialog::Share { key } => self.cards_for(key),
+            _ => Vec::new(),
+        };
+        crate::ui::dialogs::view(
+            dialog,
+            crate::ui::person::compose(&cards).as_ref(),
+            self.phones.first().map(|phone| phone.name.as_str()),
+            self.checked.len(),
+        )
     }
 
     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
@@ -884,7 +686,13 @@ impl cosmic::Application for AppModel {
                 Message::ToggleContextPage(ContextPage::About),
             ),
             ContextPage::Settings => context_drawer::context_drawer(
-                self.settings_view(),
+                crate::ui::settings::view(
+                    &self.config,
+                    self.store.as_ref().map_or(&[], ContactStore::books),
+                    &self.writable_ids,
+                    &self.writable_names,
+                    self.accounts.is_some(),
+                ),
                 Message::ToggleContextPage(ContextPage::Settings),
             )
             .title(fl!("settings")),
@@ -1216,8 +1024,10 @@ impl cosmic::Application for AppModel {
                 self.persist_config();
             }
             Message::SyncInterval(index) => {
-                self.config.sync_interval_minutes =
-                    SYNC_INTERVALS.get(index).copied().unwrap_or_default();
+                self.config.sync_interval_minutes = crate::ui::settings::SYNC_INTERVALS
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
                 self.persist_config();
             }
 
@@ -2849,84 +2659,6 @@ impl AppModel {
             .push(bar)
             .push(editor::view(state).map(Message::Editor))
             .into()
-    }
-
-    fn settings_view(&self) -> Element<'_, Message> {
-        let spacing = cosmic::theme::spacing();
-        let mut column = widget::column::with_capacity(2).spacing(spacing.space_m);
-
-        let selected = self
-            .config
-            .default_book
-            .as_ref()
-            .and_then(|id| self.writable_ids.iter().position(|b| b == id));
-
-        let mut general = widget::settings::section().title(fl!("view")).add(
-            widget::settings::item::builder(fl!("sort-by-given-name"))
-                .description(fl!("sort-by-given-name-description"))
-                .toggler(self.config.sort_by_given_name, Message::SortByGivenName),
-        );
-        if !self.writable_names.is_empty() {
-            general = general.add(
-                widget::settings::item::builder(fl!("default-book")).control(widget::dropdown(
-                    &self.writable_names,
-                    selected,
-                    Message::DefaultBook,
-                )),
-            );
-        }
-        general = general.add(
-            widget::settings::item::builder(fl!("prefer-vcard4"))
-                .description(fl!("prefer-vcard4-description"))
-                .toggler(self.config.prefer_vcard4, Message::PreferVcard4),
-        );
-        column = column.push(general);
-
-        // Background sync cadence — only meaningful when accounts can exist
-        // at all.
-        if self.accounts.is_some() {
-            let selected = SYNC_INTERVALS
-                .iter()
-                .position(|m| *m == self.config.sync_interval_minutes)
-                .unwrap_or(0);
-            column = column.push(
-                widget::settings::section().title(fl!("sync")).add(
-                    widget::settings::item::builder(fl!("sync-interval"))
-                        .description(fl!("sync-interval-description"))
-                        .control(widget::dropdown(
-                            &*SYNC_INTERVAL_LABELS,
-                            Some(selected),
-                            Message::SyncInterval,
-                        )),
-                ),
-            );
-        }
-
-        let books = self
-            .store
-            .as_ref()
-            .map(|s| s.books().to_vec())
-            .unwrap_or_default();
-        if !books.is_empty() {
-            let mut section = widget::settings::section().title(fl!("address-books"));
-            for book in books {
-                let id = book.id.clone();
-                section = section.add(
-                    widget::settings::item::builder(book.name.clone())
-                        .description(if book.read_only {
-                            fl!("read-only-book", name = book.name.clone())
-                        } else {
-                            fl!("show-book")
-                        })
-                        .toggler(!self.config.is_hidden(&book.id), move |_| {
-                            Message::ToggleBook(id.clone())
-                        }),
-                );
-            }
-            column = column.push(section);
-        }
-
-        column.into()
     }
 }
 

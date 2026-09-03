@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+# The justfile is the build entry point, as it is for every COSMIC
+# application: `rootdir` is the DESTDIR equivalent, so this stages a complete
+# tree without touching the system.
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	just build-release
+
+override_dh_auto_install:
+	just rootdir=debian/circle prefix=/usr install
+
+# The vendored tarball is what a network-isolated builder uses; the repository
+# itself carries no vendor directory.
+override_dh_auto_clean:
+	just clean-dist
