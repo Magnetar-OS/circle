@@ -254,9 +254,22 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
     if let Some(url) = &field.action
         && !field.icon.is_empty()
     {
+        // The tooltip is this button's only name — an icon alone says
+        // nothing to a reader, and "what does this arrow do" is answered by
+        // hovering or not at all.
+        let action = match field.icon {
+            "mail-send-symbolic" => fl!("send-mail"),
+            "call-start-symbolic" => fl!("call"),
+            _ => fl!("open-link"),
+        };
         controls = controls.push(
-            widget::button::icon(widget::icon::from_name(field.icon))
-                .on_press(Message::LaunchUrl(url.clone())),
+            widget::tooltip(
+                widget::button::icon(widget::icon::from_name(field.icon))
+                    .on_press(Message::LaunchUrl(url.clone())),
+                widget::text::body(action),
+                widget::tooltip::Position::Top,
+            )
+            .apply(Element::from),
         );
     }
 

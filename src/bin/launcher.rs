@@ -231,7 +231,7 @@ impl Plugin {
                 .push(ContextAction::Compose(email.value.clone()));
             options.push(json!({
                 "id": self.context.len() - 1,
-                "name": fl!("send-email"),
+                "name": fl!("send-mail"),
             }));
         }
         if let Some(phone) = Contact::preferred(&contact.phones) {

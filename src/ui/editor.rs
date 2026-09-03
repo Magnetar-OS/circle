@@ -572,10 +572,12 @@ fn typed_section(
                     Message::ListLabel(kind, index, l)
                 }))
                 .push(preferred_button(kind, index, entry.pref == Some(1)))
-                .push(
+                .push(widget::tooltip(
                     widget::button::icon(widget::icon::from_name("list-remove-symbolic"))
                         .on_press(Message::ListRemove(kind, index)),
-                );
+                    widget::text::body(fl!("remove")),
+                    widget::tooltip::Position::Top,
+                ));
         }
 
         section = section.add(row);
@@ -615,10 +617,12 @@ fn nickname_section(state: &State) -> Element<'_, Message> {
                         .on_input(move |v| Message::ListValue(ListKind::Nickname, index, v))
                         .width(Length::Fill),
                 )
-                .push(
+                .push(widget::tooltip(
                     widget::button::icon(widget::icon::from_name("list-remove-symbolic"))
                         .on_press(Message::ListRemove(ListKind::Nickname, index)),
-                ),
+                    widget::text::body(fl!("remove")),
+                    widget::tooltip::Position::Top,
+                )),
         );
     }
 

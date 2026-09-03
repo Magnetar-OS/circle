@@ -780,10 +780,14 @@ impl cosmic::Application for AppModel {
                     if show_back {
                         widget::column::with_capacity(2)
                             .push(
-                                widget::button::icon(widget::icon::from_name(
-                                    "go-previous-symbolic",
-                                ))
-                                .on_press(Message::BackToList)
+                                widget::tooltip(
+                                    widget::button::icon(widget::icon::from_name(
+                                        "go-previous-symbolic",
+                                    ))
+                                    .on_press(Message::BackToList),
+                                    widget::text::body(fl!("back-to-list")),
+                                    widget::tooltip::Position::Bottom,
+                                )
                                 .apply(widget::container)
                                 .padding(spacing.space_xxs),
                             )

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Greek**, the second language — which is what makes the project ready for
+  translation contributions at all. The desktop entry, the applications-menu
+  entry, and the software-centre summary are translated with it, because the
+  xdgen build step reads the same catalogue the interface does.
+
 - **Linking.** The same person in two accounts can be shown as one entry:
   tick both rows and press Link, or let Find duplicates propose them. The
   detail pane composes every card underneath — a shared address appears once,

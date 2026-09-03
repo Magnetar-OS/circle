@@ -46,7 +46,7 @@ copy = Copy
 copy-email = Copy email
 copy-phone = Copy phone
 copied = Copied to the clipboard
-send-email = Send an email
+send-mail = Write an email
 call = Call
 
 # The section listing properties Circle parses but does not let you edit.
@@ -167,28 +167,8 @@ read-only-book = { $name } is read-only.
 ## Accounts — mirrors Slate's page: same store underneath, same four questions.
 
 accounts = Accounts
+sync = Sync
 add-account = Add account…
-account-name = Name
-server-url = Server address
-username = Username
-password = Password
-app-password-hint = Many providers require an app-specific password rather than your normal one.
-no-accounts-description = Add a CardDAV account to sync your address books with a server.
-sync-now = Sync now
-syncing = Syncing…
-sync-interval = Background sync
-sync-interval-description = How often to sync accounts on their own. Sync now always works.
-sync-off = Only when I press Sync
-sync-minutes = Every { $minutes } minutes
-error-no-account-store = Account storage is unavailable, so accounts cannot be saved.
-error-url-scheme = The server address must start with https://
-error-url-insecure = Refusing to send your password over an unencrypted connection. Use https://
-
-## Accounts and sync
-
-accounts = Accounts
-add-account = Add account…
-add = Add
 account-name = Name
 server-url = Server address
 username = Username
@@ -197,12 +177,11 @@ app-password-hint = Many providers require an app-specific password rather than 
 no-accounts-description =
     Add a CardDAV account to sync your contacts with a server. Accounts are
     shared with Slate — an account added there is already here.
-sync = Sync
 sync-now = Sync now
 syncing = Syncing…
-sync-interval = Sync automatically
-sync-interval-description = How often to sync in the background.
-sync-off = Off
+sync-interval = Background sync
+sync-interval-description = How often to sync accounts on their own. Sync now always works.
+sync-off = Only when I press Sync
 sync-minutes = Every { $minutes ->
         [60] hour
        *[other] { $minutes } minutes
@@ -210,7 +189,6 @@ sync-minutes = Every { $minutes ->
 error-no-account-store = Account storage is unavailable, so accounts cannot be saved.
 error-url-scheme = The server address must start with https://
 error-url-insecure = Refusing to send your password over an unencrypted connection. Use https://
-sync = Sync
 
 ## Selection and bulk actions
 
@@ -267,3 +245,5 @@ sms-body = Message
 sms-sent = Message sent.
 sms-failed = The message could not be sent: { $why }
 sms = Text
+open-link = Open in a browser
+back-to-list = Back to the list
