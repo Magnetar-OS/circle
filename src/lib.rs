@@ -10,8 +10,10 @@
 
 pub mod app;
 pub mod config;
+pub mod dedupe;
 pub mod i18n;
 pub mod key_bind;
+pub mod links;
 pub mod ui;
 
 /// Parses the command line into [`app::Flags`].
