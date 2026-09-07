@@ -174,6 +174,11 @@ pub struct AppModel {
     crm: crate::crm::CrmStore,
     /// The note being typed in the detail pane, if any.
     note_draft: String,
+    /// The selected person's relationships, resolved against the address book.
+    ///
+    /// Held rather than derived in `view` because resolving reads every
+    /// contact: once per selection is cheap, once per frame is not.
+    relations: Vec<crate::relations::Relation>,
     /// `Some` while the duplicate review screen is up. Mutually exclusive
     /// with the editor and the CSV mapper — all three claim the right-hand
     /// pane.
@@ -518,6 +523,7 @@ impl cosmic::Application for AppModel {
             links: crate::links::LinkStore::open(&contacts_root),
             crm: crate::crm::CrmStore::open(&contacts_root),
             note_draft: String::new(),
+            relations: Vec::new(),
             phones: Vec::new(),
             folded: HashMap::new(),
             review: None,
@@ -805,15 +811,22 @@ impl cosmic::Application for AppModel {
                 Some(person) => {
                     let now = chrono::Utc::now();
                     let summary = crate::crm::summarise(&self.crm, &self.person_cards());
+                    let mut stacked = widget::column::with_capacity(4)
+                        .spacing(spacing.space_m)
+                        .padding(spacing.space_s)
+                        .push(crate::ui::list::detail(
+                            person,
+                            self.photos.get(&ContactKey::of(person.head)),
+                            !self.phones.is_empty(),
+                        ));
+                    // Relationships sit with the card's own data, above the
+                    // local-only sections — they come off the card, and the
+                    // two kinds of fact should not look alike.
+                    if let Some(section) = crate::ui::crm::relations(&self.relations) {
+                        stacked = stacked.push(section);
+                    }
                     let detail: Element<'_, Message> = widget::scrollable(
-                        widget::column::with_capacity(3)
-                            .spacing(spacing.space_m)
-                            .padding(spacing.space_s)
-                            .push(crate::ui::list::detail(
-                                person,
-                                self.photos.get(&ContactKey::of(person.head)),
-                                !self.phones.is_empty(),
-                            ))
+                        stacked
                             .push(crate::ui::crm::keep_in_touch(&summary, now))
                             .push(crate::ui::crm::notes(&summary, &self.note_draft, now)),
                     )
@@ -930,7 +943,26 @@ impl cosmic::Application for AppModel {
         Subscription::batch(subscriptions)
     }
 
+    /// Dispatches one message, then re-resolves relationships if the
+    /// selection moved.
+    ///
+    /// The check lives here rather than beside each of the dozen places that
+    /// set `selected` — several of which return early — so a new one cannot
+    /// forget it. `update` itself stays the single match the conventions ask
+    /// for; this only wraps it.
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        let before = self.selected.clone();
+        let task = self.dispatch(message);
+        if self.selected != before {
+            self.refresh_relations();
+        }
+        task
+    }
+}
+
+impl AppModel {
+    #[allow(clippy::too_many_lines)]
+    fn dispatch(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::LaunchUrl(url) => {
                 if let Err(why) = open::that_detached(&url) {
@@ -968,6 +1000,7 @@ impl cosmic::Application for AppModel {
                     self.check_range_to(&key);
                 } else {
                     self.selected = Some(key);
+                    self.refresh_relations();
                 }
             }
             Message::SearchHandover(query) => {
@@ -978,6 +1011,7 @@ impl cosmic::Application for AppModel {
                 // be a guess.
                 if let [only] = self.contacts.as_slice() {
                     self.selected = Some(ContactKey::of(only));
+                    self.refresh_relations();
                 }
             }
             Message::SelectFirst => {
@@ -1043,15 +1077,15 @@ impl cosmic::Application for AppModel {
                 if modifiers.is_empty() {
                     use cosmic::iced::keyboard::key::Named;
                     if matches!(&key, Key::Named(Named::ArrowDown)) {
-                        return self.update(Message::MoveSelection(1));
+                        return self.dispatch(Message::MoveSelection(1));
                     }
                     if matches!(&key, Key::Named(Named::ArrowUp)) {
-                        return self.update(Message::MoveSelection(-1));
+                        return self.dispatch(Message::MoveSelection(-1));
                     }
                 }
                 for (bind, action) in &self.key_binds {
                     if bind.matches(modifiers, &key, Some(&physical)) {
-                        return self.update(action.message());
+                        return self.dispatch(action.message());
                     }
                 }
             }
@@ -1701,9 +1735,7 @@ impl cosmic::Application for AppModel {
         }
         Task::none()
     }
-}
 
-impl AppModel {
     /// Updates the header and window titles.
     fn update_title(&mut self) -> Task<Message> {
         let mut title = fl!("app-title");
@@ -2053,6 +2085,31 @@ impl AppModel {
     fn selected_contact(&self) -> Option<&Contact> {
         let key = self.selected.as_ref()?;
         self.contacts.iter().find(|c| key.matches(c))
+    }
+
+    /// Re-resolves the selected person's relationships.
+    ///
+    /// Against every contact in a visible book, not the filtered list: a
+    /// relationship to somebody the current search hides is still a
+    /// relationship, and one that silently stopped resolving when you typed
+    /// would look like the card had changed.
+    fn refresh_relations(&mut self) {
+        self.relations.clear();
+        let Some(raw) = self.selected_contact().map(|c| c.raw.clone()) else {
+            return;
+        };
+        if !raw.contains("RELATED") && !raw.contains("X-ABRELATEDNAMES") {
+            return; // The overwhelmingly common case; skip the whole-book read.
+        }
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let others: Vec<Contact> = store
+            .contacts()
+            .into_iter()
+            .filter(|c| !self.config.is_hidden(&c.addressbook_id))
+            .collect();
+        self.relations = crate::relations::relations(&raw, &others);
     }
 
     /// The selected person's cards as link-store coordinates, head first.

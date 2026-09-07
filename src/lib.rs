@@ -16,6 +16,7 @@ pub mod i18n;
 pub mod kdeconnect;
 pub mod key_bind;
 pub mod links;
+pub mod relations;
 pub mod ui;
 
 /// Parses the command line into [`app::Flags`].

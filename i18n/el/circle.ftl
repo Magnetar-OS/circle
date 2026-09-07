@@ -289,3 +289,5 @@ when-in-days = { $days ->
        *[other] Σε { $days } ημέρες
     }
 cadence = Υπενθύμιση επικοινωνίας
+related = Σχετικό πρόσωπο
+relationships = Σχετικά πρόσωπα

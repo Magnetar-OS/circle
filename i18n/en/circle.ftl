@@ -283,3 +283,5 @@ when-in-days = { $days ->
        *[other] In { $days } days
     }
 cadence = Remind me to be in touch
+related = Related
+relationships = Related people

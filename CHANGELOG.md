@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Related people.** A card that carries relationships — vCard 4.0 `RELATED`,
+  or the `X-ABRELATEDNAMES` form Apple Contacts writes — now shows them, and
+  each one is a link when it names somebody in your address book. UIDs,
+  `mailto:` values and plain names all resolve; a name that matches two people
+  resolves to neither, and anything unresolved is kept as text rather than
+  hidden. Read-only: Circle displays and navigates them but does not edit
+  them.
+
 - **Notes and keeping in touch** — the CRM layer. Timestamped notes per
   person, a "log a contact" button, and an optional cadence (weekly through
   yearly); anyone past theirs appears in a **Keep in touch** smart list in the

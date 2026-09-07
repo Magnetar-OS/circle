@@ -132,6 +132,34 @@ pub fn notes<'a>(
         .into()
 }
 
+/// The people this card says it is related to, each a link when it resolves.
+///
+/// Read-only: Circle displays what another client wrote and navigates it, but
+/// writing either spelling back needs a byte-preserving patcher the substrate
+/// does not have for these properties yet. See [`crate::relations`].
+pub fn relations<'a>(found: &[crate::relations::Relation]) -> Option<Element<'a, Message>> {
+    if found.is_empty() {
+        return None;
+    }
+
+    let mut section = widget::settings::section().title(fl!("relationships"));
+    for relation in found {
+        let item = widget::settings::item::builder(relation.label.clone());
+        section = section.add(match &relation.target {
+            // Resolved: a button that opens them. The whole point of showing
+            // a relationship is being able to follow it.
+            Some(key) => item.control(
+                widget::button::text(relation.name.clone()).on_press(Message::Select(key.clone())),
+            ),
+            // Not in the address book — a 3.0 card naming somebody by name is
+            // the ordinary case. Shown as text rather than hidden, and
+            // selectable so the name can still be copied.
+            None => item.control(widget::selectable_text::body(relation.name.clone())),
+        });
+    }
+    Some(section.into())
+}
+
 /// "3 days ago", "today", "in 2 days" — a date somebody can read without
 /// arithmetic.
 ///
