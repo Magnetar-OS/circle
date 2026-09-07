@@ -124,9 +124,11 @@ Reading, searching, creating, editing, and deleting contacts all work.
   `.crm/` beside the books, so a shared address book stays what other people
   put in it — see [Notes and keeping in touch](#notes-and-keeping-in-touch).
 
-Everything in [03-circle.md](03-circle.md)'s parity tiers is built, and the
-CRM layer (§7) is built bar its two optional pieces: per-person attachments,
-and `RELATED` relationship links. LDAP (§8) is untouched.
+Everything in [03-circle.md](03-circle.md)'s parity tiers is built, and so is
+the CRM layer (§7) bar business-card OCR, which §7 itself puts behind a
+feature flag and last. Relationships are read and followed but not edited —
+writing them needs substrate support that does not exist yet. LDAP (§8) is
+untouched.
 
 ## Building
 
