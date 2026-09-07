@@ -199,7 +199,7 @@ whichever milestone touches that surface.
 | **0.4** | One person, many cards | A4 linking + duplicate review · re-profile list, window it only if measured | **done** — profiling deferred, see below |
 | **0.5** | In and out | A5 QR · CSV import · KDE Connect handoff · A6 groups (if quirks table ready) | **done** |
 | **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live | **done** — one caveat below |
-| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | not started |
+| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | CRM core **done**; see below |
 
 ### What 1.0 closed
 
@@ -226,6 +226,28 @@ Everything in Track A is built and the parity table above is closed.
 or four a software centre shows best. Capturing more needs a desktop where
 nothing raises a window over Circle mid-capture; the attempts here kept
 catching other applications and were discarded.
+
+### The CRM tier, and what is left of it
+
+Built: timestamped notes, logged interactions and last-contacted, a per-person
+cadence, and the overdue smart list — all in `.crm/` beside the books, keyed
+by card so linking unions them and unlinking returns them.
+
+Not built, and each for a stated reason:
+
+- **Attachments per person.** 03 §7 puts these behind a content-addressed
+  local blob directory, and business-card OCR behind a feature flag "last".
+  Nothing here needs them yet.
+- **`RELATED` relationship links.** This is vCard data rather than local
+  metadata, so it belongs with the editor and the patcher, not with the CRM
+  store — a different change to a different layer.
+- **Reminders and notifications.** Deliberately absent: 03 §7 says to reuse
+  Slate's machinery once it moves to the substrate rather than write a second
+  scheduler. "Overdue" is therefore a question asked when the list is drawn.
+- **Automatic last-contacted from Envelope.** Waits on Envelope reporting mail
+  sent and received per address; the manual button is the half that can exist
+  without it.
+- **Birthday feed to Slate.** Substrate work (BDAY synthesis), not Circle's.
 
 ### Deferred deliberately
 

@@ -253,3 +253,39 @@ sms-failed = Το μήνυμα δεν στάλθηκε: { $why }
 sms = Μήνυμα
 open-link = Άνοιγμα σε πρόγραμμα περιήγησης
 back-to-list = Επιστροφή στη λίστα
+
+## Επικοινωνία
+
+keep-in-touch = Επικοινωνία
+last-contact = Τελευταία επαφή
+last-contacted = { $when }
+last-contacted-never = Ποτέ
+log-interaction = Καταγραφή επαφής
+overdue = Εκπρόθεσμο
+notes = Σημειώσεις
+note-placeholder = Προσθήκη σημείωσης…
+notes-are-local =
+    Οι σημειώσεις μένουν σε αυτόν τον υπολογιστή. Δεν γράφονται στην κάρτα της
+    επαφής, οπότε τίποτα εδώ δεν στέλνεται σε διακομιστή ούτε το βλέπει
+    κάποιος με τον οποίο μοιράζεστε ένα ευρετήριο.
+
+cadence-none = Χωρίς υπενθύμιση
+cadence-weekly = Εβδομαδιαία
+cadence-fortnightly = Κάθε δεκαπενθήμερο
+cadence-monthly = Μηνιαία
+cadence-quarterly = Κάθε τρεις μήνες
+cadence-twice-yearly = Δύο φορές τον χρόνο
+cadence-yearly = Ετήσια
+
+when-today = Σήμερα
+when-yesterday = Χθες
+when-tomorrow = Αύριο
+when-days-ago = { $days ->
+        [one] Πριν από { $days } ημέρα
+       *[other] Πριν από { $days } ημέρες
+    }
+when-in-days = { $days ->
+        [one] Σε { $days } ημέρα
+       *[other] Σε { $days } ημέρες
+    }
+cadence = Υπενθύμιση επικοινωνίας

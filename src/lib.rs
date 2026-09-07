@@ -10,6 +10,7 @@
 
 pub mod app;
 pub mod config;
+pub mod crm;
 pub mod dedupe;
 pub mod i18n;
 pub mod kdeconnect;

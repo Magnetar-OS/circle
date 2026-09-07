@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Notes and keeping in touch** — the CRM layer. Timestamped notes per
+  person, a "log a contact" button, and an optional cadence (weekly through
+  yearly); anyone past theirs appears in a **Keep in touch** smart list in the
+  sidebar. None of it is written to a card: it lives in `.crm/` beside the
+  address books, invisible to the vdir layer and never sent to a server, so a
+  shared book stays what other people put in it. A linked person's notes are
+  the union of their cards', so linking and unlinking lose nothing; deleting a
+  contact takes their notes with them, and undo brings both back.
+
 - A conventions audit ([CONVENTIONS-AUDIT.md](CONVENTIONS-AUDIT.md)) covering
   all fifteen COSMIC checklist items with the evidence for each, the three
   problems it found, and the four places Circle knowingly diverges.

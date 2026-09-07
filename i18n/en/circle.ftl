@@ -247,3 +247,39 @@ sms-failed = The message could not be sent: { $why }
 sms = Text
 open-link = Open in a browser
 back-to-list = Back to the list
+
+## Keeping in touch
+
+keep-in-touch = Keep in touch
+last-contact = Last in touch
+last-contacted = { $when }
+last-contacted-never = Never
+log-interaction = Log a contact
+overdue = Overdue
+notes = Notes
+note-placeholder = Add a note…
+notes-are-local =
+    Notes stay on this computer. They are not written to the contact's card,
+    so nothing here is sent to a server or seen by anyone you share an
+    address book with.
+
+cadence-none = No reminder
+cadence-weekly = Weekly
+cadence-fortnightly = Fortnightly
+cadence-monthly = Monthly
+cadence-quarterly = Every three months
+cadence-twice-yearly = Twice a year
+cadence-yearly = Yearly
+
+when-today = Today
+when-yesterday = Yesterday
+when-tomorrow = Tomorrow
+when-days-ago = { $days ->
+        [one] { $days } day ago
+       *[other] { $days } days ago
+    }
+when-in-days = { $days ->
+        [one] In { $days } day
+       *[other] In { $days } days
+    }
+cadence = Remind me to be in touch

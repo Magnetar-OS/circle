@@ -57,6 +57,10 @@ impl ContactKey {
 enum NavEntry {
     All,
     Book(String),
+    /// Everybody past the cadence they were given — the keep-in-touch smart
+    /// list (03 §7). Computed when the list is drawn rather than stored,
+    /// because "overdue" is a question about today, not a property of a card.
+    Overdue,
     /// A `CATEGORIES` value — the vCard-native half of groups (03, tier 4).
     Category(String),
     /// A `KIND:group` / `X-ADDRESSBOOKSERVER-KIND:group` card — the other
@@ -165,6 +169,11 @@ pub struct AppModel {
     /// by the row that stands for them. Rebuilt by `reload`, because which
     /// card is the head depends on which of them the filter left visible.
     folded: HashMap<ContactKey, Vec<Contact>>,
+    /// Notes, interactions, and cadences — Circle's own data, beside the
+    /// books rather than in them. See [`crate::crm`].
+    crm: crate::crm::CrmStore,
+    /// The note being typed in the detail pane, if any.
+    note_draft: String,
     /// `Some` while the duplicate review screen is up. Mutually exclusive
     /// with the editor and the CSV mapper — all three claim the right-hand
     /// pane.
@@ -252,8 +261,17 @@ struct Review {
 #[derive(Clone, Debug)]
 struct DeletedCard {
     book: String,
+    uid: String,
     file_name: String,
     raw: String,
+    /// The card's notes, interactions and cadence, carried through the
+    /// deletion.
+    ///
+    /// Notes about somebody who no longer exists must not linger — but the
+    /// delete is undoable, and an undo that brought back the card and not
+    /// what you had written about them would be a quieter kind of loss than
+    /// the one it was meant to prevent.
+    crm: Option<crate::crm::Record>,
 }
 
 /// Below this width the three panes collapse to one — list or detail, not
@@ -342,6 +360,12 @@ pub enum Message {
 
     Unlink(ContactKey),
     ShareRequested,
+
+    LogInteraction,
+    SetCadence(usize),
+    NoteInput(String),
+    AddNote,
+    RemoveNote(String),
     PhonesFound(Vec<crate::kdeconnect::Device>),
     SmsRequested(String),
     SmsBody(String),
@@ -492,6 +516,8 @@ impl cosmic::Application for AppModel {
             config_handler,
             store,
             links: crate::links::LinkStore::open(&contacts_root),
+            crm: crate::crm::CrmStore::open(&contacts_root),
+            note_draft: String::new(),
             phones: Vec::new(),
             folded: HashMap::new(),
             review: None,
@@ -777,11 +803,22 @@ impl cosmic::Application for AppModel {
         let detail_or_placeholder = |show_back: bool| -> Element<'_, Message> {
             match &person {
                 Some(person) => {
-                    let detail = crate::ui::list::detail(
-                        person,
-                        self.photos.get(&ContactKey::of(person.head)),
-                        !self.phones.is_empty(),
-                    );
+                    let now = chrono::Utc::now();
+                    let summary = crate::crm::summarise(&self.crm, &self.person_cards());
+                    let detail: Element<'_, Message> = widget::scrollable(
+                        widget::column::with_capacity(3)
+                            .spacing(spacing.space_m)
+                            .padding(spacing.space_s)
+                            .push(crate::ui::list::detail(
+                                person,
+                                self.photos.get(&ContactKey::of(person.head)),
+                                !self.phones.is_empty(),
+                            ))
+                            .push(crate::ui::crm::keep_in_touch(&summary, now))
+                            .push(crate::ui::crm::notes(&summary, &self.note_draft, now)),
+                    )
+                    .height(Length::Fill)
+                    .into();
                     if show_back {
                         widget::column::with_capacity(2)
                             .push(
@@ -1368,6 +1405,51 @@ impl cosmic::Application for AppModel {
                 self.dialog = None;
                 return self.toast(fl!("sms-sent"));
             }
+            Message::LogInteraction => {
+                let Some(card) = self.head_card() else {
+                    return Task::none();
+                };
+                if let Err(why) = self.crm.log_interaction(&card, "", chrono::Utc::now()) {
+                    return self.toast(why);
+                }
+                // The nav's overdue count is now stale, and this person may
+                // have just left the smart list.
+                self.rebuild_nav();
+                self.reload();
+            }
+            Message::SetCadence(index) => {
+                let Some(card) = self.head_card() else {
+                    return Task::none();
+                };
+                let days = crate::ui::crm::CADENCES
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
+                if let Err(why) = self.crm.set_cadence(&card, Some(days)) {
+                    return self.toast(why);
+                }
+                self.rebuild_nav();
+                self.reload();
+            }
+            Message::NoteInput(text) => self.note_draft = text,
+            Message::AddNote => {
+                let Some(card) = self.head_card() else {
+                    return Task::none();
+                };
+                let text = std::mem::take(&mut self.note_draft);
+                if let Err(why) = self.crm.add_note(&card, &text, chrono::Utc::now()) {
+                    return self.toast(why);
+                }
+            }
+            Message::RemoveNote(id) => {
+                // The note may belong to any of a linked person's cards, so
+                // ask each of them rather than only the head.
+                for card in self.person_cards() {
+                    if let Err(why) = self.crm.remove_note(&card, &id) {
+                        return self.toast(why);
+                    }
+                }
+            }
             Message::Unlink(key) => {
                 if let Err(why) = self.links.unlink(&key.book, &key.uid) {
                     return self.toast(why);
@@ -1684,6 +1766,17 @@ impl AppModel {
                 .icon(crate::ui::icon("avatar-default-symbolic"));
         }
 
+        // The keep-in-touch smart list, above the groups. Hidden until
+        // something has a cadence: an "Overdue" row that can only ever be
+        // empty is a feature advertising itself at the user.
+        if !self.crm.is_empty() {
+            self.nav
+                .insert()
+                .text(fl!("keep-in-touch"))
+                .data(NavEntry::Overdue)
+                .icon(crate::ui::icon("alarm-symbolic"));
+        }
+
         // Groups, read off the cards' CATEGORIES rather than kept anywhere:
         // the categories ARE the groups (tier 4's vCard-native half), so a
         // group with no members simply stops existing — nothing to garbage
@@ -1794,6 +1887,12 @@ impl AppModel {
         }
 
         self.fold_links();
+
+        if matches!(filter, Some(NavEntry::Overdue)) {
+            let overdue = self.overdue_keys();
+            self.contacts
+                .retain(|contact| overdue.contains(&ContactKey::of(contact)));
+        }
 
         if self.config.sort_by_given_name {
             self.contacts.sort_by_key(|c| {
@@ -1956,6 +2055,56 @@ impl AppModel {
         self.contacts.iter().find(|c| key.matches(c))
     }
 
+    /// The selected person's cards as link-store coordinates, head first.
+    ///
+    /// The head is what a new note, an interaction, or a cadence is recorded
+    /// against — every CRM write lands on exactly one card, the same rule
+    /// editing follows.
+    fn person_cards(&self) -> Vec<crate::links::CardRef> {
+        self.selected_cards()
+            .into_iter()
+            .map(|(contact, _)| crate::links::CardRef {
+                book: contact.addressbook_id.clone(),
+                uid: contact.uid.clone(),
+            })
+            .collect()
+    }
+
+    fn head_card(&self) -> Option<crate::links::CardRef> {
+        self.person_cards().into_iter().next()
+    }
+
+    /// Everybody past their cadence, as of now.
+    ///
+    /// Recomputed rather than cached: it depends on the clock, so a cached
+    /// answer is wrong by definition the moment it is stored.
+    fn overdue_keys(&self) -> Vec<ContactKey> {
+        if self.crm.is_empty() {
+            return Vec::new();
+        }
+        let now = chrono::Utc::now();
+        self.contacts
+            .iter()
+            .filter(|contact| {
+                let key = ContactKey::of(contact);
+                let cards = self.cards_of(&key);
+                crate::crm::summarise(&self.crm, &cards).is_overdue(now)
+            })
+            .map(ContactKey::of)
+            .collect()
+    }
+
+    /// [`Self::person_cards`] for any row, not just the selected one.
+    fn cards_of(&self, key: &ContactKey) -> Vec<crate::links::CardRef> {
+        self.cards_for(key)
+            .into_iter()
+            .map(|(contact, _)| crate::links::CardRef {
+                book: contact.addressbook_id.clone(),
+                uid: contact.uid.clone(),
+            })
+            .collect()
+    }
+
     /// Whether the window is too narrow for panes side by side.
     fn is_collapsed(&self) -> bool {
         self.width < COLLAPSE_WIDTH
@@ -2005,10 +2154,20 @@ impl AppModel {
             queue_removal(store, &key.book, &contact.file_name);
             self.photos.remove(key);
             label = contact.label();
+            let card = crate::links::CardRef {
+                book: key.book.clone(),
+                uid: key.uid.clone(),
+            };
+            let crm = self.crm.record(&card).cloned();
+            if let Err(why) = self.crm.forget(&card) {
+                tracing::warn!(%why, "could not remove the notes for a deleted contact");
+            }
             removed.push(DeletedCard {
                 book: key.book.clone(),
+                uid: key.uid.clone(),
                 file_name: contact.file_name,
                 raw: contact.raw,
+                crm,
             });
         }
 
@@ -2066,7 +2225,18 @@ impl AppModel {
                 &card.file_name,
                 &card.raw,
             ) {
-                Ok(()) => queue_push(store, &card.book, &card.file_name),
+                Ok(()) => {
+                    queue_push(store, &card.book, &card.file_name);
+                    if let Some(record) = card.crm {
+                        let card = crate::links::CardRef {
+                            book: card.book.clone(),
+                            uid: card.uid.clone(),
+                        };
+                        if let Err(why) = self.crm.restore(&card, record) {
+                            tracing::warn!(%why, "could not put back the notes for an undone delete");
+                        }
+                    }
+                }
                 Err(why) => {
                     first_error.get_or_insert_with(|| why.to_string());
                 }

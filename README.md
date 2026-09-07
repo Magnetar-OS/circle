@@ -112,8 +112,16 @@ Reading, searching, creating, editing, and deleting contacts all work.
   does nothing is worse than one that is not there. Calls stay with the
   desktop's `tel:` handler, which is the supported path.
 
-Everything in [03-circle.md](03-circle.md)'s parity tiers is now built; the
-CRM layer (§7) and LDAP (§8) are the remaining beyond-parity work.
+- **Keeping in touch** — the layer between an address book and a CRM.
+  Timestamped notes per person, a "log a contact" button, and an optional
+  cadence (weekly through yearly) that puts somebody in the **Keep in touch**
+  smart list when they fall past it. None of it touches a card: it lives in
+  `.crm/` beside the books, so a shared address book stays what other people
+  put in it — see [Notes and keeping in touch](#notes-and-keeping-in-touch).
+
+Everything in [03-circle.md](03-circle.md)'s parity tiers is built, and the
+CRM layer (§7) is built bar its two optional pieces: per-person attachments,
+and `RELATED` relationship links. LDAP (§8) is untouched.
 
 ## Building
 
@@ -236,6 +244,31 @@ What the composed view does with two cards:
 Editing a linked person edits **one** card — the head — and the editor says
 which book that is. Values belonging to another card are edited by unlinking,
 or by selecting that card in its own book.
+
+## Notes and keeping in touch
+
+An address book records who somebody is. What you last said to them, and how
+often you meant to, is a different kind of fact — and it must not end up on a
+card that syncs. A colleague sharing a work address book should not receive a
+field saying when you last rang them.
+
+So this data lives in `~/.local/share/contacts/.crm/`, one JSON file per card,
+beside the books rather than inside them. The dot makes it invisible to the
+vdir collection scanner, so it is never listed as an address book and never
+offered to a server. [tests/crm.rs](tests/crm.rs) pins both halves of that:
+that a note leaves the `.vcf` bytes untouched, and that `.crm/` never
+registers as a collection.
+
+Records are keyed by **card**, not by person. A linked person's notes are the
+union of their cards' notes — the same rule the detail view uses for their
+addresses — so linking and unlinking are lossless in both directions and
+neither needs a migration. Deleting a contact takes their notes with them, and
+undoing that delete brings both back.
+
+There is no scheduler and there are no notifications. "Overdue" is a question
+asked of the data when the list is drawn, not a timer: 03 §7 is explicit that
+reminders wait for Slate's machinery to move into the substrate rather than
+growing a second one here.
 
 ## Conventions
 

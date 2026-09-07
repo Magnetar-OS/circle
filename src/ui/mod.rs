@@ -4,6 +4,7 @@
 
 pub mod accounts;
 pub mod avatar;
+pub mod crm;
 pub mod csv;
 pub mod dialogs;
 pub mod editor;
@@ -58,6 +59,7 @@ pub fn icon(name: &'static str) -> cosmic::widget::icon::Named {
 /// hicolor chain carries.
 fn fallbacks(name: &str) -> &'static [&'static str] {
     match name {
+        "alarm-symbolic" => &["alarm", "appointment-soon-symbolic", "appointment-soon"],
         "avatar-default-symbolic" => &["avatar-default", "user-info-symbolic", "user-info"],
         "call-start-symbolic" => &["call-start", "phone-symbolic", "phone"],
         "checkbox-checked-symbolic" => &["checkbox-checked", "object-select-symbolic"],

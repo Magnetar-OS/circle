@@ -226,9 +226,10 @@ pub fn detail<'a>(
     }
     column = column.push(footer);
 
-    widget::scrollable(column.padding(spacing.space_s))
-        .height(Length::Fill)
-        .into()
+    // Deliberately not scrollable. The shell stacks the CRM sections under
+    // this and scrolls the three together — a scrollable inside a scrollable
+    // gives two scrollbars and a pane that will not reach its own bottom.
+    column.into()
 }
 
 /// One labelled, selectable, copyable value, optionally with an action button
