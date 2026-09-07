@@ -194,6 +194,74 @@ fn a_cadence_falls_due_and_logging_a_contact_clears_it() {
     );
 }
 
+/// The blob a scan is stored as is shared between everyone it is attached to,
+/// and survives being detached from one of them.
+#[test]
+fn one_scan_attached_to_two_people_is_stored_once_and_outlives_one_detach() {
+    let fixture = fixture();
+    let (home, work) = (fixture.card("ada@home"), fixture.card("ada@work"));
+
+    let scan = fixture._dir.path().join("business-card.png");
+    std::fs::write(&scan, b"a scanned business card").expect("write the scan");
+
+    let mut crm = CrmStore::open(&fixture.root);
+    let stored = circle::attachments::store(&fixture.root, &scan).expect("store the blob");
+    crm.attach(&home, stored.clone()).expect("attach to home");
+    crm.attach(&work, stored.clone()).expect("attach to work");
+
+    let blobs = std::fs::read_dir(circle::attachments::blob_dir(&fixture.root))
+        .expect("the blob directory")
+        .count();
+    assert_eq!(blobs, 1, "the same bytes were stored twice");
+
+    // Detached from one: still referenced by the other, so the file stays.
+    crm.detach(&home, &stored.blob).expect("detach from home");
+    assert!(crm.is_blob_referenced(&stored.blob));
+    circle::attachments::prune(&fixture.root, &stored.blob, true).expect("prune");
+    assert!(
+        circle::attachments::path(&fixture.root, &stored).exists(),
+        "deleted a blob the other card still points at"
+    );
+
+    // Detached from both: nothing references it, so it goes.
+    crm.detach(&work, &stored.blob).expect("detach from work");
+    assert!(!crm.is_blob_referenced(&stored.blob));
+    circle::attachments::prune(&fixture.root, &stored.blob, false).expect("prune");
+    assert!(!circle::attachments::path(&fixture.root, &stored).exists());
+}
+
+/// Attachments are the heaviest thing here, so the promise that nothing
+/// reaches the card matters most for them.
+#[test]
+fn an_attachment_never_reaches_the_card() {
+    let fixture = fixture();
+    let before = fixture.raw("ada@home");
+    let ada = fixture.card("ada@home");
+
+    let scan = fixture._dir.path().join("contract.pdf");
+    std::fs::write(&scan, vec![0u8; 4096]).expect("write the file");
+
+    let mut crm = CrmStore::open(&fixture.root);
+    let stored = circle::attachments::store(&fixture.root, &scan).expect("store");
+    crm.attach(&ada, stored).expect("attach");
+
+    let mut store = ContactStore::open(&fixture.root).expect("reopen");
+    store.refresh();
+    let after = store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@home")
+        .expect("the card")
+        .raw;
+
+    assert_eq!(after, before, "attaching a file rewrote the card");
+    assert_eq!(
+        store.books().len(),
+        2,
+        "the blob directory registered as an address book"
+    );
+}
+
 /// Notes survive the process that wrote them, because they are files.
 #[test]
 fn everything_survives_reopening_the_store() {

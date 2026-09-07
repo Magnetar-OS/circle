@@ -285,3 +285,12 @@ when-in-days = { $days ->
 cadence = Remind me to be in touch
 related = Related
 relationships = Related people
+attachment-too-big = That file is { $size }, over the { $limit } limit for attachments.
+attachments = Attachments
+attach-file = Attach a file…
+open = Open
+attachments-are-local =
+    Attachments stay on this computer, beside your address books. They are not
+    written to the contact's card and never reach a server.
+attachment-added = Attached { $name }.
+attachment-missing = { $name } is no longer on disk.

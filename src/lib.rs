@@ -9,6 +9,7 @@
 //! is why it is small.
 
 pub mod app;
+pub mod attachments;
 pub mod config;
 pub mod crm;
 pub mod dedupe;

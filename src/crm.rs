@@ -64,12 +64,19 @@ pub struct Record {
     /// How often you meant to be in touch. `None` means you never said.
     #[serde(default)]
     pub cadence_days: Option<u32>,
+    /// Files kept with this card — see [`crate::attachments`]. The bytes live
+    /// in the shared blob directory; these are references to them.
+    #[serde(default)]
+    pub attachments: Vec<crate::attachments::Attachment>,
 }
 
 impl Record {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.notes.is_empty() && self.interactions.is_empty() && self.cadence_days.is_none()
+        self.notes.is_empty()
+            && self.interactions.is_empty()
+            && self.cadence_days.is_none()
+            && self.attachments.is_empty()
     }
 
     #[must_use]
@@ -130,11 +137,31 @@ impl CrmStore {
         self.records.get(card)
     }
 
-    /// Whether anything at all has been recorded — what the "Keep in touch"
-    /// sidebar entry is hidden on.
+    /// Whether anything at all has been recorded.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.records.values().all(Record::is_empty)
+    }
+
+    /// Whether anybody has a cadence — what the "Keep in touch" sidebar entry
+    /// is hidden on.
+    ///
+    /// Not [`Self::is_empty`]: that list holds only people past a cadence, so
+    /// attaching a file or writing a note would otherwise conjure a sidebar
+    /// entry that can never have a row in it.
+    #[must_use]
+    pub fn has_any_cadence(&self) -> bool {
+        self.records.values().any(|r| r.cadence_days.is_some())
+    }
+
+    /// Every blob any record names — the reference set the attachment sweep
+    /// works from.
+    #[must_use]
+    pub fn referenced_blobs(&self) -> std::collections::HashSet<String> {
+        self.records
+            .values()
+            .flat_map(|record| record.attachments.iter().map(|a| a.blob.clone()))
+            .collect()
     }
 
     /// Adds a note against one card.
@@ -187,6 +214,46 @@ impl CrmStore {
         let record = self.records.entry(card.clone()).or_default();
         record.cadence_days = days.filter(|d| *d > 0);
         self.write(card)
+    }
+
+    /// Attaches an already-stored file to a card.
+    ///
+    /// Attaching the same blob twice is a no-op rather than a duplicate row:
+    /// the digest is the identity, so there is nothing a second copy could
+    /// mean.
+    pub fn attach(
+        &mut self,
+        card: &CardRef,
+        attachment: crate::attachments::Attachment,
+    ) -> Result<(), String> {
+        let record = self.records.entry(card.clone()).or_default();
+        if record.attachments.iter().any(|a| a.blob == attachment.blob) {
+            return Ok(());
+        }
+        record.attachments.push(attachment);
+        self.write(card)
+    }
+
+    /// Removes one attachment reference. The blob itself is the caller's
+    /// business — see [`Self::is_blob_referenced`].
+    pub fn detach(&mut self, card: &CardRef, blob: &str) -> Result<(), String> {
+        let Some(record) = self.records.get_mut(card) else {
+            return Ok(());
+        };
+        record.attachments.retain(|a| a.blob != blob);
+        self.write(card)
+    }
+
+    /// Whether any record still names this blob.
+    ///
+    /// The records are the reference count. A stored counter would be one
+    /// more thing to keep in sync, and when it drifted it would either orphan
+    /// a file forever or delete one somebody was still using.
+    #[must_use]
+    pub fn is_blob_referenced(&self, blob: &str) -> bool {
+        self.records
+            .values()
+            .any(|record| record.attachments.iter().any(|a| a.blob == blob))
     }
 
     /// Puts a whole record back — the undo side of [`Self::forget`].
@@ -303,6 +370,8 @@ pub struct Summary {
     pub notes: Vec<Note>,
     pub last_contacted: Option<DateTime<Utc>>,
     pub cadence_days: Option<u32>,
+    /// Every card's attachments, newest first — history, like the notes.
+    pub attachments: Vec<crate::attachments::Attachment>,
 }
 
 impl Summary {
@@ -334,6 +403,9 @@ pub fn summarise(store: &CrmStore, cards: &[CardRef]) -> Summary {
             continue;
         };
         summary.notes.extend(record.notes.iter().cloned());
+        summary
+            .attachments
+            .extend(record.attachments.iter().cloned());
         summary.last_contacted = summary.last_contacted.max(record.last_contacted());
         if index == 0 {
             summary.cadence_days = record.cadence_days;
@@ -342,6 +414,9 @@ pub fn summarise(store: &CrmStore, cards: &[CardRef]) -> Summary {
     // Newest first: the last thing you wrote about somebody is the thing you
     // want to see when you open them.
     summary.notes.sort_by_key(|note| std::cmp::Reverse(note.at));
+    summary
+        .attachments
+        .sort_by_key(|attachment| std::cmp::Reverse(attachment.added));
     summary
 }
 
@@ -515,6 +590,25 @@ mod tests {
         store.set_cadence(&ada, Some(30)).unwrap();
 
         assert!(summarise(&store, &[ada]).is_overdue(Utc::now()));
+    }
+
+    /// The sidebar entry is about cadences, so a note alone must not summon
+    /// a list that can only be empty.
+    #[test]
+    fn a_note_alone_does_not_make_a_keep_in_touch_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let ada = card("personal", "ada");
+        let mut store = CrmStore::open(dir.path());
+        store.add_note(&ada, "Something", Utc::now()).unwrap();
+
+        assert!(!store.is_empty(), "the note was not recorded");
+        assert!(
+            !store.has_any_cadence(),
+            "a note conjured a keep-in-touch list"
+        );
+
+        store.set_cadence(&ada, Some(30)).unwrap();
+        assert!(store.has_any_cadence());
     }
 
     #[test]

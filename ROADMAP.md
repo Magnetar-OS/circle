@@ -199,7 +199,7 @@ whichever milestone touches that surface.
 | **0.4** | One person, many cards | A4 linking + duplicate review · re-profile list, window it only if measured | **done** — profiling deferred, see below |
 | **0.5** | In and out | A5 QR · CSV import · KDE Connect handoff · A6 groups (if quirks table ready) | **done** |
 | **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live | **done** — one caveat below |
-| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | CRM core **done**; see below |
+| **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | CRM **done** bar OCR; printing and LDAP not started |
 
 ### What 1.0 closed
 
@@ -233,14 +233,20 @@ Built: timestamped notes, logged interactions and last-contacted, a per-person
 cadence, and the overdue smart list — all in `.crm/` beside the books, keyed
 by card so linking unions them and unlinking returns them.
 
+Also built: **attachments**, content-addressed under `.crm/blobs/` with the
+records as the reference count and an orphan sweep at start-up; and
+**relationships**, read from the card in both spellings (`RELATED` and
+Apple's `X-ABRELATEDNAMES`) and clickable when they resolve.
+
 Not built, and each for a stated reason:
 
-- **Attachments per person.** 03 §7 puts these behind a content-addressed
-  local blob directory, and business-card OCR behind a feature flag "last".
-  Nothing here needs them yet.
-- **`RELATED` relationship links.** This is vCard data rather than local
-  metadata, so it belongs with the editor and the patcher, not with the CRM
-  store — a different change to a different layer.
+- **Editing relationships.** Circle reads and follows them; writing either
+  property back needs a byte-preserving patcher the substrate does not have,
+  and it does not model contact `RELATED` at all. Reading needed none of
+  that, and a card arriving with relationships is now navigable rather than
+  invisible.
+- **Business-card OCR.** 03 §7 puts this behind a feature flag, explicitly
+  last. Attachments exist without it.
 - **Reminders and notifications.** Deliberately absent: 03 §7 says to reuse
   Slate's machinery once it moves to the substrate rather than write a second
   scheduler. "Overdue" is therefore a question asked when the list is drawn.

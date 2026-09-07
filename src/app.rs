@@ -169,6 +169,10 @@ pub struct AppModel {
     /// by the row that stands for them. Rebuilt by `reload`, because which
     /// card is the head depends on which of them the filter left visible.
     folded: HashMap<ContactKey, Vec<Contact>>,
+    /// Where the address books live. Held because the link store, the CRM
+    /// records and the attachment blobs all sit beside them, and a sandboxed
+    /// run must keep its own copies of all three in its own sandbox.
+    contacts_root: PathBuf,
     /// Notes, interactions, and cadences — Circle's own data, beside the
     /// books rather than in them. See [`crate::crm`].
     crm: crate::crm::CrmStore,
@@ -368,6 +372,10 @@ pub enum Message {
 
     LogInteraction,
     SetCadence(usize),
+    AttachRequested,
+    AttachPath(PathBuf),
+    OpenAttachment(String),
+    DetachFile(String),
     NoteInput(String),
     AddNote,
     RemoveNote(String),
@@ -522,6 +530,7 @@ impl cosmic::Application for AppModel {
             store,
             links: crate::links::LinkStore::open(&contacts_root),
             crm: crate::crm::CrmStore::open(&contacts_root),
+            contacts_root,
             note_draft: String::new(),
             relations: Vec::new(),
             phones: Vec::new(),
@@ -551,6 +560,15 @@ impl cosmic::Application for AppModel {
             fatal: None,
         };
         model.fatal = fatal;
+
+        // Blobs whose contact was deleted without the delete being undone are
+        // orphans. Swept here rather than at delete time, because a delete is
+        // undoable and bytes removed then could not come back.
+        let swept =
+            crate::attachments::prune_orphans(&model.contacts_root, &model.crm.referenced_blobs());
+        if swept > 0 {
+            tracing::info!(count = swept, "removed orphaned attachments");
+        }
         model.rebuild_nav();
         model.reload();
 
@@ -828,7 +846,8 @@ impl cosmic::Application for AppModel {
                     let detail: Element<'_, Message> = widget::scrollable(
                         stacked
                             .push(crate::ui::crm::keep_in_touch(&summary, now))
-                            .push(crate::ui::crm::notes(&summary, &self.note_draft, now)),
+                            .push(crate::ui::crm::notes(&summary, &self.note_draft, now))
+                            .push(crate::ui::crm::attachments(&summary)),
                     )
                     .height(Length::Fill)
                     .into();
@@ -1465,6 +1484,71 @@ impl AppModel {
                 self.rebuild_nav();
                 self.reload();
             }
+            Message::AttachRequested => {
+                if self.selected.is_none() {
+                    return Task::none();
+                }
+                return cosmic::task::future(async {
+                    use cosmic::dialog::file_chooser;
+
+                    let dialog = file_chooser::open::Dialog::new().title(fl!("attach-file"));
+                    match dialog.open_file().await {
+                        Ok(response) => match response.url().to_file_path() {
+                            Ok(path) => Message::AttachPath(path),
+                            Err(()) => Message::DialogFailed(fl!("error-remote-file")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Message::DialogCancelled,
+                        Err(why) => Message::DialogFailed(why.to_string()),
+                    }
+                });
+            }
+            Message::AttachPath(path) => {
+                let Some(card) = self.head_card() else {
+                    return Task::none();
+                };
+                let attachment = match crate::attachments::store(&self.contacts_root, &path) {
+                    Ok(attachment) => attachment,
+                    Err(why) => return self.toast(why),
+                };
+                let name = attachment.name.clone();
+                if let Err(why) = self.crm.attach(&card, attachment) {
+                    return self.toast(why);
+                }
+                self.rebuild_nav();
+                return self.toast(fl!("attachment-added", name = name));
+            }
+            Message::OpenAttachment(blob) => {
+                let summary = crate::crm::summarise(&self.crm, &self.person_cards());
+                let Some(attachment) = summary.attachments.iter().find(|a| a.blob == blob) else {
+                    return Task::none();
+                };
+                let path = crate::attachments::path(&self.contacts_root, attachment);
+                if !path.exists() {
+                    // The blob directory is a plain directory; somebody may
+                    // have cleaned it out from underneath us.
+                    return self.toast(fl!("attachment-missing", name = attachment.name.clone()));
+                }
+                if let Err(why) = open::that_detached(&path) {
+                    tracing::warn!(?path, %why, "could not open the attachment");
+                    return self.toast(why.to_string());
+                }
+            }
+            Message::DetachFile(blob) => {
+                // The reference may sit on any of a linked person's cards.
+                for card in self.person_cards() {
+                    if let Err(why) = self.crm.detach(&card, &blob) {
+                        return self.toast(why);
+                    }
+                }
+                // Only now is the question answerable: the blob goes if no
+                // record anywhere still names it.
+                let referenced = self.crm.is_blob_referenced(&blob);
+                if let Err(why) = crate::attachments::prune(&self.contacts_root, &blob, referenced)
+                {
+                    tracing::warn!(%why, "could not remove an unreferenced attachment");
+                }
+                self.rebuild_nav();
+            }
             Message::NoteInput(text) => self.note_draft = text,
             Message::AddNote => {
                 let Some(card) = self.head_card() else {
@@ -1801,7 +1885,7 @@ impl AppModel {
         // The keep-in-touch smart list, above the groups. Hidden until
         // something has a cadence: an "Overdue" row that can only ever be
         // empty is a feature advertising itself at the user.
-        if !self.crm.is_empty() {
+        if self.crm.has_any_cadence() {
             self.nav
                 .insert()
                 .text(fl!("keep-in-touch"))
@@ -2136,7 +2220,7 @@ impl AppModel {
     /// Recomputed rather than cached: it depends on the clock, so a cached
     /// answer is wrong by definition the moment it is stored.
     fn overdue_keys(&self) -> Vec<ContactKey> {
-        if self.crm.is_empty() {
+        if !self.crm.has_any_cadence() {
             return Vec::new();
         }
         let now = chrono::Utc::now();

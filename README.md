@@ -112,6 +112,11 @@ Reading, searching, creating, editing, and deleting contacts all work.
   does nothing is worse than one that is not there. Calls stay with the
   desktop's `tel:` handler, which is the supported path.
 
+- **Attachments and related people.** Files kept with a contact — scans,
+  contracts — content-addressed so the same file attached twice is stored
+  once, and local like the notes. Relationships a card already carries
+  (vCard 4.0 `RELATED`, or Apple's `X-ABRELATEDNAMES`) are shown and are
+  clickable when they name somebody in your address book.
 - **Keeping in touch** — the layer between an address book and a CRM.
   Timestamped notes per person, a "log a contact" button, and an optional
   cadence (weekly through yearly) that puts somebody in the **Keep in touch**
@@ -264,6 +269,22 @@ union of their cards' notes — the same rule the detail view uses for their
 addresses — so linking and unlinking are lossless in both directions and
 neither needs a migration. Deleting a contact takes their notes with them, and
 undoing that delete brings both back.
+
+Attachments follow the same rule and one more: their bytes live in
+`.crm/blobs/`, named by the SHA-256 of their contents. Attaching one file to
+three people stores it once, and a blob is removed only when no record names
+it any more — the records *are* the reference count, so there is no counter
+to drift. Deleting a contact does not sweep their blobs, because the delete is
+undoable and bytes removed then could not come back; orphans are swept at
+start-up instead, when nothing is mid-undo.
+
+Relationships are the exception to all of this: they come off the **card**,
+not from `.crm/`. Circle reads both spellings — vCard 4.0 `RELATED` and the
+`X-ABRELATEDNAMES` form Apple Contacts writes — and makes each one a link when
+its value names somebody in your address book. It does not edit them: writing
+either back needs a byte-preserving patcher the substrate does not have, and
+they stay listed under "also on this card" because that list is about what
+Circle will not change.
 
 There is no scheduler and there are no notifications. "Overdue" is a question
 asked of the data when the list is drawn, not a timer: 03 §7 is explicit that

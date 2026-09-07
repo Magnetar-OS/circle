@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Attachments.** A scan, a contract, a photo of a whiteboard — kept with a
+  contact and opened from the detail pane. Files are content-addressed, so
+  attaching the same scan to three people stores it once, and a blob is
+  deleted only when no record still names it. Nothing is written to the card:
+  vCard *can* carry an attachment inline, and doing that would push a
+  multi-megabyte PDF through CardDAV onto a server and into every other
+  client. 25 MB per file, and the message says both numbers when something is
+  over it.
+
 - **Related people.** A card that carries relationships — vCard 4.0 `RELATED`,
   or the `X-ABRELATEDNAMES` form Apple Contacts writes — now shows them, and
   each one is a link when it names somebody in your address book. UIDs,

@@ -132,6 +132,45 @@ pub fn notes<'a>(
         .into()
 }
 
+/// Files kept with this person.
+pub fn attachments<'a>(summary: &Summary) -> Element<'a, Message> {
+    let spacing = cosmic::theme::spacing();
+
+    let mut section = widget::settings::section().title(fl!("attachments"));
+    for attachment in &summary.attachments {
+        let blob = attachment.blob.clone();
+        section = section.add(
+            widget::settings::item::builder(attachment.name.clone())
+                .description(crate::attachments::format_size(attachment.size))
+                .control(
+                    widget::row::with_capacity(2)
+                        .spacing(spacing.space_xxs)
+                        .push(
+                            widget::button::text(fl!("open"))
+                                .on_press(Message::OpenAttachment(blob.clone())),
+                        )
+                        .push(widget::tooltip(
+                            widget::button::icon(crate::ui::icon("list-remove-symbolic"))
+                                .on_press(Message::DetachFile(blob)),
+                            widget::text::body(fl!("remove")),
+                            widget::tooltip::Position::Top,
+                        )),
+                ),
+        );
+    }
+
+    widget::column::with_capacity(3)
+        .spacing(spacing.space_xs)
+        .push(section)
+        .push(widget::button::standard(fl!("attach-file")).on_press(Message::AttachRequested))
+        .push(
+            widget::text::caption(fl!("attachments-are-local"))
+                .class(cosmic::theme::Text::Custom(crate::ui::dim_text))
+                .wrapping(cosmic::iced::core::text::Wrapping::Word),
+        )
+        .into()
+}
+
 /// The people this card says it is related to, each a link when it resolves.
 ///
 /// Read-only: Circle displays what another client wrote and navigates it, but

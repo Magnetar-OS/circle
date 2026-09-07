@@ -53,6 +53,9 @@ strsim = "0.11"
 # SVG renderers pull their own dependencies, and the matrix is all this needs
 # — the SVG is twenty lines and keeps the payload under our own control.
 qrcode = { version = "0.14", default-features = false }
+# Content-addressing for attachments: the digest is a blob's identity, so two
+# copies of the same scan are stored once. Already in the graph.
+sha2 = "0.10"
 # KDE Connect handoff: asking the daemon which phone is reachable, and handing
 # it a number to dial or text. Already in the tree through libcosmic, and used
 # directly here for the same reason Slate does — the alternative is shelling
