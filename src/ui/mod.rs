@@ -37,7 +37,6 @@ pub fn dim_text(theme: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
 ///
 /// Naming a replacement per icon rather than one generic fallback is the whole
 /// point: the replacement has to still mean something in that button.
-#[must_use]
 pub fn icon(name: &'static str) -> cosmic::widget::icon::Named {
     use cosmic::widget::icon::IconFallback;
 
@@ -140,7 +139,10 @@ mod tests {
             }
         }
 
-        assert!(checked > 0, "found no icon lookups to check; the scan is broken");
+        assert!(
+            checked > 0,
+            "found no icon lookups to check; the scan is broken"
+        );
         assert!(
             unchained.is_empty(),
             "these icons would render blank on a theme that lacks them, with no \

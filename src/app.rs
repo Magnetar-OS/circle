@@ -722,7 +722,7 @@ impl cosmic::Application for AppModel {
         let collapsed = self.is_collapsed();
 
         let select_toggle = widget::tooltip(
-            widget::button::icon(widget::icon::from_name("object-select-symbolic"))
+            widget::button::icon(crate::ui::icon("object-select-symbolic"))
                 .class(if self.selecting {
                     cosmic::theme::Button::Suggested
                 } else {
@@ -781,10 +781,8 @@ impl cosmic::Application for AppModel {
                         widget::column::with_capacity(2)
                             .push(
                                 widget::tooltip(
-                                    widget::button::icon(widget::icon::from_name(
-                                        "go-previous-symbolic",
-                                    ))
-                                    .on_press(Message::BackToList),
+                                    widget::button::icon(crate::ui::icon("go-previous-symbolic"))
+                                        .on_press(Message::BackToList),
                                     widget::text::body(fl!("back-to-list")),
                                     widget::tooltip::Position::Bottom,
                                 )
@@ -1655,7 +1653,7 @@ impl AppModel {
             .insert()
             .text(fl!("all-contacts"))
             .data(NavEntry::All)
-            .icon(widget::icon::from_name("system-users-symbolic"));
+            .icon(crate::ui::icon("system-users-symbolic"));
 
         let books: Vec<CalendarMeta> = self
             .store
@@ -1668,7 +1666,7 @@ impl AppModel {
                 .insert()
                 .text(book.name.clone())
                 .data(NavEntry::Book(book.id.clone()))
-                .icon(widget::icon::from_name("avatar-default-symbolic"));
+                .icon(crate::ui::icon("avatar-default-symbolic"));
         }
 
         // Groups, read off the cards' CATEGORIES rather than kept anywhere:
@@ -1694,7 +1692,7 @@ impl AppModel {
                 .insert()
                 .text(category.clone())
                 .data(NavEntry::Category(category))
-                .icon(widget::icon::from_name("folder-symbolic"));
+                .icon(crate::ui::icon("folder-symbolic"));
         }
 
         // Group cards, the other mechanism. Same section of the sidebar as
@@ -1712,7 +1710,7 @@ impl AppModel {
                     book: group.addressbook_id.clone(),
                     uid: group.uid.clone(),
                 })
-                .icon(widget::icon::from_name("system-users-symbolic"));
+                .icon(crate::ui::icon("system-users-symbolic"));
         }
 
         // Restore the previous filter if that book still exists, else fall back

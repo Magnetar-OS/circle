@@ -80,8 +80,7 @@ fn pair<'a, M: Clone + 'static>(
     // A name match is a hunch and says so; the evidence-backed ones do not
     // need a badge, because their reason already names the value that matched.
     if !candidate.reason.is_strong() {
-        header =
-            header.push(crate::ui::icon("dialog-question-symbolic").size(spacing.space_s));
+        header = header.push(crate::ui::icon("dialog-question-symbolic").size(spacing.space_s));
     }
 
     let body = widget::row::with_capacity(2)

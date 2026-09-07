@@ -595,8 +595,7 @@ fn preferred_button<'a>(kind: ListKind, index: usize, is_preferred: bool) -> Ele
         "non-starred-symbolic"
     };
     widget::tooltip(
-        widget::button::icon(crate::ui::icon(icon))
-            .on_press(Message::ListPreferred(kind, index)),
+        widget::button::icon(crate::ui::icon(icon)).on_press(Message::ListPreferred(kind, index)),
         widget::text::body(fl!("set-preferred")),
         widget::tooltip::Position::Top,
     )

@@ -243,8 +243,7 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
         .push(widget::selectable_text::body(owned.clone()));
 
     let copy: Element<'a, Message> = widget::tooltip(
-        widget::button::icon(crate::ui::icon("edit-copy-symbolic"))
-            .on_press(Message::Copy(owned)),
+        widget::button::icon(crate::ui::icon("edit-copy-symbolic")).on_press(Message::Copy(owned)),
         widget::text::body(fl!("copy")),
         widget::tooltip::Position::Top,
     )
