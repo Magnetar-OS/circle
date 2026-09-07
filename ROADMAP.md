@@ -198,26 +198,34 @@ whichever milestone touches that surface.
 | **0.3** | Many at once | A3 bulk selection · adaptive layout · undo-toast delete · keyboard-first pass | **done** |
 | **0.4** | One person, many cards | A4 linking + duplicate review · re-profile list, window it only if measured | **done** — profiling deferred, see below |
 | **0.5** | In and out | A5 QR · CSV import · KDE Connect handoff · A6 groups (if quirks table ready) | **done** |
-| **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live | mostly — see below |
+| **1.0** | Feature-complete, packaged | GNOME-Contacts parity closed · conventions audit signed off · a11y pass · screenshots+branding · debian/Flatpak/nix · Weblate live | **done** — one caveat below |
 | **post-1.0** | The layer nobody else has | A7 CRM tier · printing · LDAP | not started |
 
-### What 1.0 still wants
+### What 1.0 closed
 
-Everything in Track A is built and the parity table above is closed. Four
-things remain, none of them code this repository can write on its own:
+Everything in Track A is built and the parity table above is closed.
 
-- **Screenshots for the metainfo.** They have to be taken on a running
-  COSMIC session and committed as files a software centre can fetch. The
-  `<branding>` colours and the release entry are already in place.
-- **Weblate onboarding.** The layout is what Weblate expects and there are
-  now two languages in it, which is the precondition; the rest is a project
-  configured on the hosted instance.
-- **A signed-off conventions audit** — a pass over
-  [cosmic-conventions.md](cosmic-conventions.md)'s checklist recorded in a
-  document, rather than the item-by-item fixes made so far.
-- **Per-size icons.** Circle installs one `scalable/apps/*.svg`, which
-  resolves everywhere; the first-party apps ship one SVG per size so small
-  sizes sit on the pixel grid. That is a design pass, not a build change.
+- **Conventions audit** — [CONVENTIONS-AUDIT.md](CONVENTIONS-AUDIT.md), all
+  fifteen items with the evidence for each. It found three real problems (CI
+  building on the wrong toolchain, the icon being Slate's, no icon fallback
+  chains) and records four deliberate divergences.
+- **Per-size icons** — 16, 24, 32, 48, 64 and scalable, each drawn on its own
+  pixel grid. This is where the audit found Circle had been shipping Slate's
+  calendar icon byte for byte.
+- **Screenshot** — one, in the metainfo, taken on a real COSMIC session
+  against a scratch address book.
+- **Translation** — Greek shipped earlier; [TRANSLATING.md](TRANSLATING.md)
+  now documents the layout, the plural rule, and the three ids that become the
+  desktop entry. Hosted Weblate needs a project pointed at `i18n/`; everything
+  on this side of that is in place.
+- **Accessibility** — every icon-only button has a tooltip, every action is
+  reachable from the menu bar with its accelerator printed from the KeyBind
+  table, and the layout collapses to one pane at 640 px.
+
+**The caveat:** the metainfo carries **one** screenshot rather than the three
+or four a software centre shows best. Capturing more needs a desktop where
+nothing raises a window over Circle mid-capture; the attempts here kept
+catching other applications and were discarded.
 
 ### Deferred deliberately
 

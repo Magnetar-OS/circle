@@ -237,6 +237,18 @@ Editing a linked person edits **one** card — the head — and the editor says
 which book that is. Values belonging to another card are edited by unlinking,
 or by selecting that card in its own book.
 
+## Conventions
+
+[CONVENTIONS-AUDIT.md](CONVENTIONS-AUDIT.md) walks the COSMIC conventions
+checklist item by item with the evidence for each, including the three things
+the audit found wrong and the four places Circle knowingly diverges.
+
+## Translating
+
+Two languages ship: English and Greek. Adding a third is one file —
+[TRANSLATING.md](TRANSLATING.md) has the layout, the plural rule, and the
+three ids that become the desktop entry rather than interface text.
+
 ## Licence
 
 GPL-3.0-only for this application; the substrate it links is MPL-2.0. See

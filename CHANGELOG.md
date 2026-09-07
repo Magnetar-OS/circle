@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A conventions audit ([CONVENTIONS-AUDIT.md](CONVENTIONS-AUDIT.md)) covering
+  all fifteen COSMIC checklist items with the evidence for each, the three
+  problems it found, and the four places Circle knowingly diverges.
+- A screenshot in the AppStream metainfo, and a translator's guide
+  ([TRANSLATING.md](TRANSLATING.md)).
+
 - **Greek**, the second language — which is what makes the project ready for
   translation contributions at all. The desktop entry, the applications-menu
   entry, and the software-centre summary are translated with it, because the
@@ -94,6 +100,20 @@ All notable changes to this project are documented here. The format follows
   the address book on disk.
 
 ### Fixed
+
+- Circle was shipping Slate's calendar icon — byte for byte the same file, so
+  a contacts application showed a calendar in the applications menu, on the
+  panel, in its own About page, and in the software centre. Replaced with a
+  contact card, drawn once per size (16 through 64, plus scalable) on each
+  size's own pixel grid.
+- Icon lookups had no fallback chain, so a theme missing one would render a
+  blank button with no warning. Every lookup now names its own replacements.
+- CI built on whatever `stable` was rather than the 1.98 the project declares:
+  the workflow passed a toolchain to an action, which overrides
+  `rust-toolchain.toml`.
+- `circle --search=` now selects the person when the query names exactly one,
+  which is what the launcher plugin's Enter always claimed to do. Two or more
+  matches stay a list.
 
 - The English catalogue defined twenty message ids twice, so half of the
   Accounts page's strings were silently shadowed by an older set. Deduplicated,

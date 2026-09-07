@@ -56,6 +56,17 @@
     <keyword>address book</keyword>
     <keyword>vCard</keyword>
   </keywords>
+  <!--
+    Screenshots are fetched by a software centre, so they are URLs into the
+    repository rather than files beside the metainfo. Taken on a real COSMIC
+    session against a scratch address book — none of the people in it exist.
+  -->
+  <screenshots>
+    <screenshot type="default">
+      <caption>Address books, groups, and the contact list</caption>
+      <image type="source" width="1373" height="871">https://github.com/entro314-labs/circle/raw/main/resources/screenshots/contacts.png</image>
+    </screenshot>
+  </screenshots>
   <content_rating type="oars-1.1" />
   <branding>
     <color type="primary" scheme_preference="light">#842bd2</color>

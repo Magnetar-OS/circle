@@ -281,6 +281,11 @@ pub enum Message {
     UpdateConfig(Config),
 
     QueryChanged(String),
+    /// A search handed over from outside — the launcher plugin, or a second
+    /// `circle --search=`. Unlike typing, this selects the person when the
+    /// query names exactly one, because the launcher's promise is that Enter
+    /// opens *them*, not that it narrows a list they then have to click.
+    SearchHandover(String),
     Select(ContactKey),
     SelectFirst,
     MoveSelection(isize),
@@ -535,7 +540,7 @@ impl cosmic::Application for AppModel {
         }
         if let Some(query) = flags.search {
             tasks.push(cosmic::task::message(cosmic::Action::App(
-                Message::QueryChanged(query),
+                Message::SearchHandover(query),
             )));
         }
         if flags.new_contact {
@@ -591,7 +596,7 @@ impl cosmic::Application for AppModel {
                         .collect();
                     if let Some(query) = task.search {
                         tasks.push(cosmic::task::message(cosmic::Action::App(
-                            Message::QueryChanged(query),
+                            Message::SearchHandover(query),
                         )));
                     }
                     if task.new_contact {
@@ -926,6 +931,16 @@ impl cosmic::Application for AppModel {
                     self.check_range_to(&key);
                 } else {
                     self.selected = Some(key);
+                }
+            }
+            Message::SearchHandover(query) => {
+                self.query = query;
+                self.reload();
+                // Exactly one match is unambiguous; two or more is a list the
+                // user still has to choose from, and choosing for them would
+                // be a guess.
+                if let [only] = self.contacts.as_slice() {
+                    self.selected = Some(ContactKey::of(only));
                 }
             }
             Message::SelectFirst => {
