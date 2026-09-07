@@ -1813,9 +1813,26 @@ impl AppModel {
                 continue;
             }
             match cosmic_pim_core::vcard::photo(&contact.raw) {
-                Some(cosmic_pim_core::vcard::Photo::Bytes { data, .. }) => {
+                // `is_renderable` is load-bearing, not defensive. Iced accepts
+                // any bytes and only finds out it cannot decode them at draw
+                // time, where it silently renders nothing — so a card with a
+                // truncated or bogus PHOTO became an invisible row instead of
+                // falling back to initials. Leaving the entry out of the cache
+                // is what makes `avatar()` generate one.
+                Some(photo @ cosmic_pim_core::vcard::Photo::Bytes { .. })
+                    if photo.is_renderable() =>
+                {
+                    let cosmic_pim_core::vcard::Photo::Bytes { data, .. } = photo else {
+                        unreachable!("matched the Bytes variant")
+                    };
                     self.photos
                         .insert(key, widget::image::Handle::from_bytes(data));
+                }
+                Some(cosmic_pim_core::vcard::Photo::Bytes { .. }) => {
+                    tracing::debug!(
+                        contact = contact.label(),
+                        "PHOTO is not a recognised image; showing initials"
+                    );
                 }
                 // A remote avatar is never fetched — network access for a
                 // contact photo is off by design (03: opt-in "if ever").

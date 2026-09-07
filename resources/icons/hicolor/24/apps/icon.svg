@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!--
+    Circle at 24. The name lines are gone: below 32 they are thinner than a
+    pixel and only muddy the card. Card, band, person — the three shapes that
+    still carry the meaning.
+  -->
+  <rect x="2" y="3" width="20" height="18" rx="2" fill="#f4f5f7"/>
+  <path d="M2 5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v6H2z" fill="#7c2ac4"/>
+  <circle cx="12" cy="11" r="5" fill="#fdfdfd"/>
+  <g fill="#6f21b5">
+    <circle cx="12" cy="9.5" r="1.8"/>
+    <path d="M8.8 14a3.2 3.2 0 0 1 6.4 0z"/>
+  </g>
+</svg>

@@ -19,7 +19,12 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 # installed below only exist after a build. `install` depends on that.
 desktop-src := cargo-target-dir / 'xdgen' / 'app.desktop'
 metainfo-src := cargo-target-dir / 'xdgen' / 'app.metainfo.xml'
-icon-src := 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg'
+icon-dir := 'resources' / 'icons' / 'hicolor'
+icon-src := icon-dir / 'scalable' / 'apps' / 'icon.svg'
+# One SVG per size, drawn on the pixel grid at that size rather than scaled
+# down from the detailed one — the higher-effort option the first-party COSMIC
+# apps take, and the difference between a crisp panel icon and a smudge.
+icon-sizes := '16 24 32 48 64'
 launcher-plugin-src := 'resources' / 'launcher' / 'plugin.ron'
 
 # Install destinations
@@ -27,7 +32,8 @@ base-dir := absolute_path(clean(rootdir / prefix))
 bin-dst := base-dir / 'bin' / name
 desktop-dst := base-dir / 'share' / 'applications' / (appid + '.desktop')
 metainfo-dst := base-dir / 'share' / 'metainfo' / (appid + '.metainfo.xml')
-icon-dst := base-dir / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / (appid + '.svg')
+icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
+icon-dst := icons-dst / 'scalable' / 'apps' / (appid + '.svg')
 launcher-bin-dst := base-dir / 'bin' / launcher
 # pop-launcher discovers plugins under share/pop-launcher/plugins/<name>/.
 launcher-plugin-dst := base-dir / 'share' / 'pop-launcher' / 'plugins' / name / 'plugin.ron'
@@ -115,6 +121,10 @@ install: build-release
     install -Dm0644 {{desktop-src}} {{desktop-dst}}
     install -Dm0644 {{metainfo-src}} {{metainfo-dst}}
     install -Dm0644 {{icon-src}} {{icon-dst}}
+    for size in {{icon-sizes}}; do \
+        install -Dm0644 {{icon-dir}}/$size/apps/icon.svg \
+            {{icons-dst}}/$size/apps/{{appid}}.svg; \
+    done
     install -Dm0644 {{launcher-plugin-src}} {{launcher-plugin-dst}}
     if [ -z '{{rootdir}}' ]; then \
         update-desktop-database {{ base-dir / 'share' / 'applications' }} || true; \
@@ -124,6 +134,9 @@ install: build-release
 # Uninstalls installed files
 uninstall:
     rm -f {{bin-dst}} {{launcher-bin-dst}} {{desktop-dst}} {{metainfo-dst}} {{icon-dst}} {{launcher-plugin-dst}}
+    for size in {{icon-sizes}}; do \
+        rm -f {{icons-dst}}/$size/apps/{{appid}}.svg; \
+    done
 
 # Vendor dependencies locally
 vendor:

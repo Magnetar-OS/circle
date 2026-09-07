@@ -85,7 +85,7 @@ fn row<'a>(
         .align_y(Alignment::Center)
         .spacing(spacing.space_xs);
     if let Some(ticked) = check {
-        content = content.push(widget::icon::from_name(if ticked {
+        content = content.push(crate::ui::icon(if ticked {
             "checkbox-checked-symbolic"
         } else {
             "checkbox-symbolic"
@@ -243,7 +243,7 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
         .push(widget::selectable_text::body(owned.clone()));
 
     let copy: Element<'a, Message> = widget::tooltip(
-        widget::button::icon(widget::icon::from_name("edit-copy-symbolic"))
+        widget::button::icon(crate::ui::icon("edit-copy-symbolic"))
             .on_press(Message::Copy(owned)),
         widget::text::body(fl!("copy")),
         widget::tooltip::Position::Top,
@@ -264,7 +264,7 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
         };
         controls = controls.push(
             widget::tooltip(
-                widget::button::icon(widget::icon::from_name(field.icon))
+                widget::button::icon(crate::ui::icon(field.icon))
                     .on_press(Message::LaunchUrl(url.clone())),
                 widget::text::body(action),
                 widget::tooltip::Position::Top,
@@ -278,7 +278,7 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
     if can_text && let Some(number) = &field.number {
         controls = controls.push(
             widget::tooltip(
-                widget::button::icon(widget::icon::from_name("mail-message-new-symbolic"))
+                widget::button::icon(crate::ui::icon("mail-message-new-symbolic"))
                     .on_press(Message::SmsRequested(number.clone())),
                 widget::text::body(fl!("sms")),
                 widget::tooltip::Position::Top,

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!--
+    Circle at 16, where every edge has to land on a pixel boundary or it
+    renders as grey mush. Flat fills, no gradients — a two-stop gradient
+    across five pixels is five different greys and no gradient.
+  -->
+  <rect x="1" y="2" width="14" height="12" rx="2" fill="#f4f5f7"/>
+  <path d="M1 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4H1z" fill="#7c2ac4"/>
+  <circle cx="8" cy="8" r="3.5" fill="#fdfdfd"/>
+  <g fill="#6f21b5">
+    <circle cx="8" cy="7" r="1.3"/>
+    <path d="M5.8 10.4a2.2 2.2 0 0 1 4.4 0z"/>
+  </g>
+</svg>

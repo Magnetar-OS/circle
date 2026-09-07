@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Circle. Coordinates are whole pixels at this size, not a scaled 128. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdfdfd"/>
+      <stop offset="1" stop-color="#e6e8ec"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9d4ae0"/>
+      <stop offset="1" stop-color="#6f21b5"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="10" width="52" height="48" rx="7" fill="url(#body)"/>
+  <path d="M6 17a7 7 0 0 1 7-7h38a7 7 0 0 1 7 7v11H6z" fill="url(#header)"/>
+  <circle cx="32" cy="28" r="10" fill="#fdfdfd"/>
+  <g fill="#6f21b5">
+    <circle cx="32" cy="24.5" r="3.5"/>
+    <path d="M26 33a6 6 0 0 1 12 0z"/>
+  </g>
+  <g fill="#aab2c0">
+    <rect x="20" y="43" width="24" height="4" rx="2"/>
+    <rect x="25" y="50" width="14" height="3" rx="1.5"/>
+  </g>
+</svg>

@@ -573,7 +573,7 @@ fn typed_section(
                 }))
                 .push(preferred_button(kind, index, entry.pref == Some(1)))
                 .push(widget::tooltip(
-                    widget::button::icon(widget::icon::from_name("list-remove-symbolic"))
+                    widget::button::icon(crate::ui::icon("list-remove-symbolic"))
                         .on_press(Message::ListRemove(kind, index)),
                     widget::text::body(fl!("remove")),
                     widget::tooltip::Position::Top,
@@ -595,7 +595,7 @@ fn preferred_button<'a>(kind: ListKind, index: usize, is_preferred: bool) -> Ele
         "non-starred-symbolic"
     };
     widget::tooltip(
-        widget::button::icon(widget::icon::from_name(icon))
+        widget::button::icon(crate::ui::icon(icon))
             .on_press(Message::ListPreferred(kind, index)),
         widget::text::body(fl!("set-preferred")),
         widget::tooltip::Position::Top,
@@ -618,7 +618,7 @@ fn nickname_section(state: &State) -> Element<'_, Message> {
                         .width(Length::Fill),
                 )
                 .push(widget::tooltip(
-                    widget::button::icon(widget::icon::from_name("list-remove-symbolic"))
+                    widget::button::icon(crate::ui::icon("list-remove-symbolic"))
                         .on_press(Message::ListRemove(ListKind::Nickname, index)),
                     widget::text::body(fl!("remove")),
                     widget::tooltip::Position::Top,

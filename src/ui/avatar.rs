@@ -69,7 +69,7 @@ pub fn avatar<'a, M: 'a>(
 
     let text = initials(name);
     let glyphs: Element<'a, M> = if text.is_empty() {
-        widget::icon::from_name("avatar-default-symbolic")
+        crate::ui::icon("avatar-default-symbolic")
             .size((side * 0.55) as u16)
             .icon()
             .class(cosmic::theme::Svg::Custom(std::rc::Rc::new(|_| {

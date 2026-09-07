@@ -43,9 +43,11 @@ jobs:
             libudev-dev libinput-dev pkg-config \
             appstream desktop-file-utils
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # No toolchain action on purpose. `rust-toolchain.toml` names the
+      # channel and its components, and rustup — preinstalled on the runner —
+      # installs both on the first cargo invocation. Passing a toolchain to an
+      # action overrides that file, which is how CI silently starts building
+      # on something other than the version Cargo.toml declares.
 
       - uses: Swatinem/rust-cache@v2
 

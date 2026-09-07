@@ -1,38 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!--
+    Circle — a contact card: a person on a card, not a calendar.
+
+    A deliberate sibling of Slate's icon (the same rounded body, the same
+    paper gradient) so the suite reads as one set, and deliberately unlike it
+    in the two things the eye catches first: the header is Circle's own
+    branding purple rather than Slate's blue, and the shape on it is a person
+    rather than a grid of days.
+  -->
   <defs>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#fdfdfd"/>
       <stop offset="1" stop-color="#e6e8ec"/>
     </linearGradient>
+    <!-- Either side of #842bd2, the primary in the AppStream branding. -->
     <linearGradient id="header" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2d7dd2"/>
-      <stop offset="1" stop-color="#1c5fa8"/>
+      <stop offset="0" stop-color="#9d4ae0"/>
+      <stop offset="1" stop-color="#6f21b5"/>
     </linearGradient>
   </defs>
 
-  <!-- page -->
+  <!-- card -->
   <rect x="12" y="20" width="104" height="96" rx="14" fill="url(#body)"/>
-  <!-- header band -->
-  <path d="M12 34a14 14 0 0 1 14-14h76a14 14 0 0 1 14 14v16H12z" fill="url(#header)"/>
-  <!-- binder rings -->
-  <rect x="36" y="8" width="10" height="26" rx="5" fill="#8b94a3"/>
-  <rect x="82" y="8" width="10" height="26" rx="5" fill="#8b94a3"/>
+  <!-- header band, cut so the avatar straddles its edge -->
+  <path d="M12 34a14 14 0 0 1 14-14h76a14 14 0 0 1 14 14v22H12z" fill="url(#header)"/>
 
-  <!-- grid of days -->
-  <g fill="#aab2c0">
-    <rect x="28" y="62" width="14" height="12" rx="3"/>
-    <rect x="50" y="62" width="14" height="12" rx="3"/>
-    <rect x="72" y="62" width="14" height="12" rx="3"/>
-    <rect x="94" y="62" width="12" height="12" rx="3"/>
-
-    <rect x="28" y="82" width="14" height="12" rx="3"/>
-    <rect x="72" y="82" width="14" height="12" rx="3"/>
-    <rect x="94" y="82" width="12" height="12" rx="3"/>
-
-    <rect x="28" y="102" width="14" height="10" rx="3"/>
-    <rect x="50" y="102" width="14" height="10" rx="3"/>
-    <rect x="72" y="102" width="14" height="10" rx="3"/>
+  <!-- avatar: white disc on the band edge, person inside -->
+  <circle cx="64" cy="56" r="20" fill="#fdfdfd"/>
+  <g fill="#6f21b5">
+    <circle cx="64" cy="49" r="7"/>
+    <path d="M52 66a12 12 0 0 1 24 0z"/>
   </g>
-  <!-- today marker -->
-  <rect x="50" y="82" width="14" height="12" rx="3" fill="#e4572e"/>
+
+  <!-- name and detail lines -->
+  <g fill="#aab2c0">
+    <rect x="40" y="86" width="48" height="8" rx="4"/>
+    <rect x="50" y="100" width="28" height="7" rx="3.5"/>
+  </g>
 </svg>

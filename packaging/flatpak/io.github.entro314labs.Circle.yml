@@ -58,6 +58,10 @@ modules:
         /app/share/metainfo/io.github.entro314labs.Circle.metainfo.xml
       - install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg
         /app/share/icons/hicolor/scalable/apps/io.github.entro314labs.Circle.svg
+      # One SVG per size, as the justfile installs them.
+      - for size in 16 24 32 48 64; do install -Dm0644
+        "resources/icons/hicolor/$size/apps/icon.svg"
+        "/app/share/icons/hicolor/$size/apps/io.github.entro314labs.Circle.svg"; done
     sources:
       - type: dir
         path: ../..
