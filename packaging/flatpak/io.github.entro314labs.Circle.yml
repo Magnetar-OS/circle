@@ -68,7 +68,7 @@ modules:
       # The substrate, beside this checkout, exactly as Cargo.toml's
       # `../cosmic-pim` path expects.
       - type: git
-        url: https://github.com/entro314-labs/cosmic-pim.git
+        url: https://github.com/Magnetar-OS/cosmic-pim.git
         branch: main
         dest: ../cosmic-pim
       - cargo-sources.json

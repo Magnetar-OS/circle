@@ -62,7 +62,7 @@ jobs:
       tag: ${{ inputs.tag || '' }}
       product_name: 'circle'
       repo_name: 'entro314labs'
-      pages_repo: 'entro314-labs/arch-repo'
+      pages_repo: 'Magnetar-OS/arch-repo'
     secrets: inherit
 
   # AUR listing. Validates on every release; publishes only when the
@@ -76,7 +76,7 @@ jobs:
       pkgname: 'circle-bin'
       product_name: 'circle'
       pkgdesc: 'Find and edit the people in your address book'
-      url: 'https://github.com/entro314-labs/circle'
+      url: 'https://github.com/Magnetar-OS/circle'
       license: 'GPL-3.0-only'
       depends: 'libxkbcommon openssl sqlite'
       provides: 'circle'

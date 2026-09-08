@@ -6,7 +6,7 @@ edition = "2024"
 # MPL-2.0 and is linked, not absorbed. See LICENSING.md.
 license = "GPL-3.0-only"
 description = "Circle — contacts for the COSMIC desktop"
-repository = "https://github.com/entro314-labs/circle"
+repository = "https://github.com/Magnetar-OS/circle"
 rust-version = "1.98.0"
 
 [build-dependencies]

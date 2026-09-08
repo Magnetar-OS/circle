@@ -10,13 +10,13 @@ readable by `khard`, `vdirsyncer`, and anything else that speaks `.vcf`.
 ## Part of a suite
 
 Circle is one of three applications over a shared substrate,
-[cosmic-pim](https://github.com/entro314-labs/cosmic-pim):
+[cosmic-pim](https://github.com/Magnetar-OS/cosmic-pim):
 
 | App | Repository | What it is |
 |---|---|---|
-| **Slate** | [slate](https://github.com/entro314-labs/slate) | Calendar and tasks |
+| **Slate** | [slate](https://github.com/Magnetar-OS/slate) | Calendar and tasks |
 | **Circle** | you are here | Contacts |
-| **Envelope** | [envelope](https://github.com/entro314-labs/envelope) | Mail (scaffold) |
+| **Envelope** | [envelope](https://github.com/Magnetar-OS/envelope) | Mail (scaffold) |
 
 The substrate owns the contact model, vCard parsing, the vdir on disk, CardDAV,
 and accounts. This repository is the COSMIC front end over
@@ -26,7 +26,7 @@ and accounts. This repository is the COSMIC front end over
 `$XDG_CONFIG_HOME/cosmic-pim/accounts.toml` with the password in the OS keychain,
 not one per app.
 
-[cosmic-pim/ARCHITECTURE.md](https://github.com/entro314-labs/cosmic-pim/blob/main/ARCHITECTURE.md)
+[cosmic-pim/ARCHITECTURE.md](https://github.com/Magnetar-OS/cosmic-pim/blob/main/ARCHITECTURE.md)
 is the canonical description of how the layers fit.
 
 ## State
