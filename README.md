@@ -173,7 +173,7 @@ the window. They land in `target/xdgen/`, which is what `just install` and
 | --- | --- |
 | `~/.local/share/contacts/` | Your address books. One directory per book, one `.vcf` per contact. |
 | `~/.config/cosmic-pim/accounts.toml` | Accounts, shared with Slate and Envelope. Passwords are in the keychain, never here. |
-| `~/.config/cosmic/io.github.entro314labs.Circle/v1/` | Settings, via `cosmic-config`: hidden books, default book, sort order. |
+| `~/.config/cosmic/com.magnetaros.Circle/v1/` | Settings, via `cosmic-config`: hidden books, default book, sort order. |
 
 A book looks like this, which is what `vdirsyncer` writes:
 

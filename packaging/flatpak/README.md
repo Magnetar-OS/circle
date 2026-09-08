@@ -10,7 +10,7 @@ curl -O https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/c
 # whenever Cargo.lock changes
 python3 flatpak-cargo-generator.py ../../Cargo.lock -o cargo-sources.json
 
-flatpak-builder --user --install --force-clean build io.github.entro314labs.Circle.yml
+flatpak-builder --user --install --force-clean build com.magnetaros.Circle.yml
 ```
 
 `cargo-sources.json` is generated, not committed: it is a few megabytes of

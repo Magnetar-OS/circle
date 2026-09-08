@@ -4,7 +4,7 @@
 name := 'circle'
 launcher := 'circle-launcher'
 # The unique ID of the application.
-appid := 'io.github.entro314labs.Circle'
+appid := 'com.magnetaros.Circle'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''

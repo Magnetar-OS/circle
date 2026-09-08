@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: circle
 Upstream-Contact: entro314 labs <hey@myroomie.gr>
-Source: https://github.com/entro314-labs/circle
+Source: https://github.com/Magnetar-OS/circle
 
 Files: *
 Copyright: 2026 Dominikos Pritis

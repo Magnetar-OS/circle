@@ -4,11 +4,11 @@ GenericName=Contacts
 Comment=Find and edit the people in your address book
 Categories=COSMIC;Office;ContactManagement;
 Exec=circle %U
-Icon=io.github.entro314labs.Circle
+Icon=com.magnetaros.Circle
 Terminal=false
 Type=Application
 StartupNotify=true
-StartupWMClass=io.github.entro314labs.Circle
+StartupWMClass=com.magnetaros.Circle
 MimeType=text/vcard;text/x-vcard;text/directory;
 Keywords=contact;contacts;address;addressbook;vcard;person;people;phone;email;
 # Deliberately NOT DBusActivatable, for the reason spelled out in full in

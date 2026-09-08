@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.entro314labs.Circle</id>
+  <id>com.magnetaros.Circle</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
   <name>Circle</name>
   <summary>Find and edit the people in your address book</summary>
-  <developer id="io.github.entro314labs">
+  <developer id="com.magnetaros">
     <name>entro314 labs</name>
   </developer>
   <description>
@@ -26,12 +26,12 @@
     </p>
   </description>
   <icon type="remote" width="64" height="64" scale="1">
-    https://github.com/entro314-labs/circle/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
+    https://github.com/Magnetar-OS/circle/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
   </icon>
-  <url type="homepage">https://github.com/entro314-labs/circle</url>
-  <url type="bugtracker">https://github.com/entro314-labs/circle/issues</url>
-  <url type="vcs-browser">https://github.com/entro314-labs/circle</url>
-  <launchable type="desktop-id">io.github.entro314labs.Circle.desktop</launchable>
+  <url type="homepage">https://github.com/Magnetar-OS/circle</url>
+  <url type="bugtracker">https://github.com/Magnetar-OS/circle/issues</url>
+  <url type="vcs-browser">https://github.com/Magnetar-OS/circle</url>
+  <launchable type="desktop-id">com.magnetaros.Circle.desktop</launchable>
   <provides>
     <!-- How an application says it belongs to COSMIC. The desktop's own store
          and app library filter on this id; without it Circle is an ordinary
@@ -64,7 +64,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>Address books, groups, and the contact list</caption>
-      <image type="source" width="1373" height="871">https://github.com/entro314-labs/circle/raw/main/resources/screenshots/contacts.png</image>
+      <image type="source" width="1373" height="871">https://github.com/Magnetar-OS/circle/raw/main/resources/screenshots/contacts.png</image>
     </screenshot>
   </screenshots>
   <content_rating type="oars-1.1" />

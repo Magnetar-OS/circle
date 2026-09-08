@@ -21,7 +21,7 @@ use cosmic_pim_core::store::contacts::ContactStore;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
-const APP_ID: &str = "io.github.entro314labs.Circle";
+const APP_ID: &str = "com.magnetaros.Circle";
 
 /// Results returned for one query.
 const MAX_RESULTS: usize = 12;

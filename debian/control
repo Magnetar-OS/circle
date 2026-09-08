@@ -11,7 +11,7 @@ Build-Depends:
  libssl-dev,
  libxkbcommon-dev,
 Standards-Version: 4.7.0
-Homepage: https://github.com/entro314-labs/circle
+Homepage: https://github.com/Magnetar-OS/circle
 Rules-Requires-Root: no
 
 Package: circle

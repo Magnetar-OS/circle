@@ -20,7 +20,7 @@ use crate::ui::csv;
 use crate::ui::dialogs::Dialog;
 use crate::ui::editor;
 
-const APP_ID: &str = "io.github.entro314labs.Circle";
+const APP_ID: &str = "com.magnetaros.Circle";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
 

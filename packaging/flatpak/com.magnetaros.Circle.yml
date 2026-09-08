@@ -13,7 +13,7 @@
 # Filesystem access is deliberately narrow: the address books, the suite's
 # shared config, and nothing else. Import and export go through the file
 # portal, so no blanket home access is needed for them.
-app-id: io.github.entro314labs.Circle
+app-id: com.magnetaros.Circle
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
@@ -32,7 +32,7 @@ finish-args:
   # Passwords, via the OS keyring.
   - --talk-name=org.freedesktop.secrets
   # Single-instance activation claims the app id on the session bus.
-  - --own-name=io.github.entro314labs.Circle
+  - --own-name=com.magnetaros.Circle
   # The address books and the suite's shared accounts file.
   - --filesystem=xdg-data/contacts:create
   - --filesystem=xdg-config/cosmic-pim:create
@@ -53,15 +53,15 @@ modules:
       - install -Dm0755 target/release/circle /app/bin/circle
       - install -Dm0755 target/release/circle-launcher /app/bin/circle-launcher
       - install -Dm0644 target/xdgen/app.desktop
-        /app/share/applications/io.github.entro314labs.Circle.desktop
+        /app/share/applications/com.magnetaros.Circle.desktop
       - install -Dm0644 target/xdgen/app.metainfo.xml
-        /app/share/metainfo/io.github.entro314labs.Circle.metainfo.xml
+        /app/share/metainfo/com.magnetaros.Circle.metainfo.xml
       - install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg
-        /app/share/icons/hicolor/scalable/apps/io.github.entro314labs.Circle.svg
+        /app/share/icons/hicolor/scalable/apps/com.magnetaros.Circle.svg
       # One SVG per size, as the justfile installs them.
       - for size in 16 24 32 48 64; do install -Dm0644
         "resources/icons/hicolor/$size/apps/icon.svg"
-        "/app/share/icons/hicolor/$size/apps/io.github.entro314labs.Circle.svg"; done
+        "/app/share/icons/hicolor/$size/apps/com.magnetaros.Circle.svg"; done
     sources:
       - type: dir
         path: ../..
