@@ -875,3 +875,70 @@ fn a_category_containing_a_comma_survives_the_editor() {
         "the editor split a category on the comma inside it"
     );
 }
+
+/// A birthday with no year.
+///
+/// `BDAY:--0415` is legal vCard and common from people who would rather not
+/// state an age. The substrate models it separately from a full date —
+/// `birthday_month_day` beside `birthday` — because one property maps to two
+/// fields, and the editor offers a single date box for the pair.
+///
+/// So this asks both halves of the question the ladder ends on: does the
+/// narrow projection *lose* it, and does the interface *show* it.
+const AGELESS: &str = "BEGIN:VCARD\r\n\
+VERSION:4.0\r\n\
+UID:ada@ageless\r\n\
+FN:Ada Lovelace\r\n\
+BDAY:--0415\r\n\
+END:VCARD\r\n";
+
+/// **Known gap, not yet fixed — in the substrate.** `patch_vcard` writes
+/// `BDAY` from `contact.birthday.iter()`, which yields nothing for a year-less
+/// date, so `set` receives an empty line list and that means *remove the
+/// property*. `birthday_month_day` is never consulted, and the line is gone.
+///
+/// A new shape rather than a new rung: one property maps to two model fields,
+/// and the writer knows only one of them. Reported with this reproduction;
+/// kept ignored so `cargo test` names it on every run, and written as the
+/// acceptance test.
+///
+/// Circle's own half — showing a year-less birthday rather than leaving it
+/// invisible — is fixed, and covered in `ui::person`.
+#[ignore = "known gap in the substrate: patch_vcard writes BDAY from `birthday` only, so a year-less one is removed"]
+#[test]
+fn a_birthday_with_no_year_survives_an_edit() {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+
+    let mut fixture = fixture();
+    write_contact_raw(&fixture.book, "ageless.vcf", AGELESS).expect("seed");
+    fixture.store.refresh();
+
+    let contact = fixture
+        .store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@ageless")
+        .expect("the seeded contact");
+    assert_eq!(
+        contact.birthday_month_day,
+        Some((4, 15)),
+        "the substrate stopped modelling a year-less BDAY, so this tests the wrong thing"
+    );
+    assert!(
+        contact.birthday.is_none(),
+        "a year-less BDAY is not a full date"
+    );
+
+    // Edit something else entirely, through the real editor.
+    let mut editor = State::edit(contact, fixture.store.books());
+    editor.update(Message::Text(Field::DisplayName, "Ada Byron".into()));
+    fixture.store.save(&editor.finish()).expect("save");
+
+    let card =
+        std::fs::read_to_string(fixture.book.path.join("ageless.vcf")).expect("read it back");
+    assert!(card.contains("Ada Byron"), "the edit did not land: {card}");
+    assert!(
+        card.contains("BDAY:--0415"),
+        "editing a name destroyed a birthday that had no year: {card}"
+    );
+}

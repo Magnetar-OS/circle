@@ -24,6 +24,18 @@
 
 use cosmic_pim_core::model::Contact;
 
+/// A birthday with no year, as a day and a month.
+///
+/// Formatted through a date in a leap year so the month name is localised by
+/// the same machinery as a full birthday, and so 29 February is expressible.
+/// The year is then not shown, because the card does not claim one.
+fn ageless_birthday(month: u32, day: u32) -> String {
+    chrono::NaiveDate::from_ymd_opt(2024, month, day).map_or_else(
+        || format!("{day:02}-{month:02}"),
+        |date| date.format("%-d %B").to_string(),
+    )
+}
+
 /// One labelled value in the detail pane, and where it came from.
 #[derive(Clone, Debug)]
 pub struct Field<'a> {
@@ -147,11 +159,22 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
     }
 
     // Scalars: the first card that has one.
-    if let Some((contact, book)) = cards.iter().find(|(c, _)| c.birthday.is_some()) {
-        let birthday = contact.birthday.expect("just filtered for it");
+    // A card carries either a full date or a year-less one — `BDAY:--0415` is
+    // legal vCard and common from people who would rather not state an age.
+    // Showing only the first left the second invisible, which reads as though
+    // the card had no birthday on it at all.
+    if let Some((contact, book)) = cards
+        .iter()
+        .find(|(c, _)| c.birthday.is_some() || c.birthday_month_day.is_some())
+    {
+        let value = match (contact.birthday, contact.birthday_month_day) {
+            (Some(date), _) => date.format("%-d %B %Y").to_string(),
+            (None, Some((month, day))) => ageless_birthday(month, day),
+            (None, None) => unreachable!("just filtered for one of them"),
+        };
         fields.push(Field {
             label: crate::fl!("birthday"),
-            value: birthday.format("%-d %B %Y").to_string(),
+            value,
             action: None,
             icon: "",
             number: None,
@@ -322,6 +345,44 @@ mod tests {
         assert!(shown.contains("Analytical Engine Co"), "{shown}");
         assert!(shown.contains("Research"), "{shown}");
         assert!(shown.contains("Difference Engines"), "{shown}");
+    }
+
+    /// A card that states a day and a month but no year still has a birthday
+    /// on it, and showing nothing said otherwise.
+    #[test]
+    fn a_birthday_with_no_year_is_shown_without_inventing_one() {
+        let mut card = contact("personal", "a", "Ada");
+        card.birthday_month_day = Some((4, 15));
+
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        let birthday = composed
+            .fields
+            .iter()
+            .find(|f| f.value.contains("April"))
+            .expect("the birthday is shown");
+
+        assert!(birthday.value.contains("15"), "{}", birthday.value);
+        assert!(
+            !birthday.value.contains("2024"),
+            "a year was invented for a card that gives none: {}",
+            birthday.value
+        );
+    }
+
+    /// 29 February has no year-less representation in a non-leap year; the
+    /// formatting must not silently drop it.
+    #[test]
+    fn a_leap_day_birthday_is_expressible() {
+        let mut card = contact("personal", "a", "Ada");
+        card.birthday_month_day = Some((2, 29));
+
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        assert!(
+            composed.fields.iter().any(|f| f.value.contains("29")),
+            "a leap-day birthday was lost in formatting"
+        );
     }
 
     #[test]

@@ -127,6 +127,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A birthday with no year — `BDAY:--0415`, legal vCard and common from people
+  who would rather not state an age — was not shown at all. It is now, as a
+  day and a month, without inventing a year. **A related bug in the substrate
+  is still open:** editing any field deletes such a birthday from the card
+  entirely. Reported, with a failing acceptance test kept visible in Circle's
+  suite.
+
 - Editing any field stripped parameters from a contact's other lines —
   `X-SERVICE`, `PID`, `ALTID`, `LANGUAGE`, and a quoted `GEO=` on an address
   all vanished from a card whose *name* was edited, and the loss pushed to the
