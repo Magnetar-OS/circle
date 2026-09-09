@@ -933,34 +933,34 @@ fn a_birthday_with_no_year_survives_an_edit() {
     );
 }
 
-/// A read-only book must refuse a **delete** too, and does not.
+/// A read-only book refuses a **delete**, not only a write.
 ///
-/// Every *write* function in the store checks `meta.read_only` —
-/// `write_contact`, `write_contact_versioned`, `write_contact_raw`,
-/// `import_vcf`. `delete` does not: its single-card path ends in
-/// `remove_file_if_present(&path)`, which is handed a path and no book and so
-/// cannot check anything. `CalendarMeta::load` says of the mark that it "makes
-/// every write path and every writable calendar picker refuse it without each
-/// having to know what a feed is". Deleting is a write path.
+/// This was a real bug, and the shape of it is worth keeping. Every write
+/// *function* in the store checked `meta.read_only` — `write_contact`,
+/// `write_contact_versioned`, `write_contact_raw`, `import_vcf` — while
+/// `delete` did not, because its single-card path ended in a helper that
+/// received a path and no book and so had nothing to check. The split ran
+/// backwards: removing one card from a *shared* file went through
+/// `write_contact_raw` and was refused, while removing a card that owned its
+/// file — the ordinary case, and the one that destroys the file rather than
+/// rewriting it — succeeded. The guard was present where the damage was
+/// smallest.
 ///
-/// The gap is backwards in the way that matters. Deleting one card out of a
-/// *shared* file goes through `write_contact_raw` and is correctly refused;
-/// deleting a card that owns its file — the ordinary case, and the one that
-/// destroys the file rather than editing it — succeeds. The defence is present
-/// exactly where the damage is smallest.
+/// The test is built so it cannot pass for the wrong reason. The book is
+/// marked read-only the way a real subscription is, with the sidecar, and its
+/// directory is left writable on purpose: a delete that succeeds proves a
+/// missing guard rather than a missing OS permission. The save is asserted
+/// refused on the same book first, so the two are contrasted in one run
+/// instead of being argued about, and the card is checked byte-identical
+/// afterwards — an error return that deleted the file anyway would otherwise
+/// read as a pass.
 ///
-/// The book here is marked read-only the way a real subscription is, with the
-/// sidecar; its directory stays writable on purpose, so a delete that succeeds
-/// proves the missing check rather than the absence of an OS permission.
-///
-/// Circle reaches this. The app guards opening the editor with the
-/// `read-only-book` toast and guards import with `error-no-writable-book`, but
-/// both delete call sites in `app.rs` call `store.delete` with no guard, so a
-/// subscribed book loses cards locally and reports success. Reported to the
-/// substrate; kept failing here, visibly, until it is fixed — the promise this
-/// breaks is the one Circle makes to the user in a toast, not only the store's.
+/// Circle guards opening the editor with the `read-only-book` toast and import
+/// with `error-no-writable-book`, but deliberately does not guard its two
+/// `store.delete` call sites. The store is the choke point; a check in the app
+/// would leave the next caller free to be wrong, which is how this happened.
+/// Fixed in the substrate.
 #[test]
-#[should_panic = "a read-only book accepted a delete"]
 fn deleting_from_a_read_only_book_is_an_error() {
     let mut fixture = fixture();
 
@@ -983,4 +983,9 @@ fn deleting_from_a_read_only_book_is_an_error() {
     let result = fixture.store.delete(&fixture.book.id, "ada@server");
 
     assert!(result.is_err(), "a read-only book accepted a delete");
+    assert_eq!(
+        fixture.on_disk(),
+        SYNCED,
+        "the delete was refused and took the card anyway"
+    );
 }
