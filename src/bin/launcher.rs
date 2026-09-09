@@ -167,17 +167,7 @@ impl Plugin {
         matches.truncate(MAX_RESULTS);
 
         for (id, contact) in matches.iter().enumerate() {
-            send(&json!({
-                "Append": {
-                    "id": id,
-                    "name": contact.label(),
-                    "description": describe(contact),
-                    "keywords": Value::Null,
-                    "icon": { "Name": "avatar-default-symbolic" },
-                    "exec": Value::Null,
-                    "window": Value::Null,
-                }
-            }));
+            send(&append_message(id, contact));
         }
 
         self.results = matches;
@@ -215,7 +205,7 @@ impl Plugin {
         self.context.clear();
 
         let Some(contact) = self.results.get(id) else {
-            send(&json!({ "Context": { "id": id, "options": [] } }));
+            send(&context_message(id, &[]));
             return;
         };
 
@@ -243,7 +233,7 @@ impl Plugin {
             }));
         }
 
-        send(&json!({ "Context": { "id": id, "options": options } }));
+        send(&context_message(id, &options));
     }
 
     fn activate_context(&mut self, _id: usize, option: usize) {
@@ -298,6 +288,33 @@ fn copy_to_clipboard(value: &str) {
     }
 }
 
+/// One search result, in the shape pop-launcher deserialises.
+///
+/// Built here rather than inline so it can be checked against
+/// `pop_launcher::PluginResponse` — the type the actual consumer reads it
+/// into. A renamed or misspelled field is otherwise invisible from this side:
+/// pop-launcher ignores a message it cannot parse, so the only symptom is a
+/// plugin that silently returns nothing.
+fn append_message(id: usize, contact: &Contact) -> Value {
+    json!({
+        "Append": {
+            "id": id,
+            "name": contact.label(),
+            "description": describe(contact),
+            "keywords": Value::Null,
+            "icon": { "Name": "avatar-default-symbolic" },
+            "exec": Value::Null,
+            "window": Value::Null,
+        }
+    })
+}
+
+/// The context menu for one result. See [`append_message`] for why it is a
+/// function.
+fn context_message(id: usize, options: &[Value]) -> Value {
+    json!({ "Context": { "id": id, "options": options } })
+}
+
 fn send(value: &Value) {
     let mut stdout = std::io::stdout().lock();
     if serde_json::to_writer(&mut stdout, value).is_ok() {
@@ -316,4 +333,97 @@ fn load_config() -> Config {
             Err((_errors, config)) => config,
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pop_launcher::PluginResponse;
+
+    /// Every message this plugin sends, read back by the types pop-launcher
+    /// itself deserialises into.
+    ///
+    /// Until this existed, nothing here was tested at all, and the wire format
+    /// was hand-built JSON checked by nobody. A renamed field, a wrong
+    /// nesting, an id of the wrong type: pop-launcher ignores a message it
+    /// cannot parse, so the only symptom is a plugin that finds nothing, and
+    /// the first report would be a user saying the launcher does not work.
+    ///
+    /// Deserialising into the consumer's own types rather than a local mirror
+    /// of them is the whole point: a mirror drifts silently, and testing a
+    /// mirror only proves this module agrees with itself.
+    fn parse(value: &Value) -> PluginResponse {
+        let text = serde_json::to_string(value).expect("the message serialises");
+        serde_json::from_str(&text)
+            .unwrap_or_else(|why| panic!("pop-launcher cannot read this message: {why}\n{text}"))
+    }
+
+    fn ada() -> Contact {
+        let mut contact = Contact::draft("personal");
+        contact.uid = "ada".into();
+        contact.display_name = "Ada Lovelace".into();
+        contact.emails.push(cosmic_pim_core::model::Typed {
+            value: "ada@example.org".into(),
+            types: Vec::new(),
+            pref: None,
+            group: None,
+            params: Vec::new(),
+        });
+        contact
+    }
+
+    #[test]
+    fn a_search_result_is_a_response_pop_launcher_can_read() {
+        match parse(&append_message(3, &ada())) {
+            PluginResponse::Append(item) => {
+                assert_eq!(item.id, 3, "the row id did not survive the wire");
+                assert_eq!(item.name, "Ada Lovelace");
+                assert!(
+                    item.description.contains("ada@example.org"),
+                    "the description lost the address: {}",
+                    item.description
+                );
+            }
+            other => panic!("a search result parsed as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_context_menu_is_a_response_pop_launcher_can_read() {
+        let options = vec![
+            json!({ "id": 0, "name": "Copy email — ada@example.org" }),
+            json!({ "id": 1, "name": "Write an email" }),
+        ];
+        match parse(&context_message(7, &options)) {
+            PluginResponse::Context { id, options } => {
+                assert_eq!(id, 7);
+                assert_eq!(options.len(), 2);
+                assert_eq!(options[0].id, 0);
+                assert!(options[1].name.contains("email"), "{:?}", options[1].name);
+            }
+            other => panic!("a context menu parsed as {other:?}"),
+        }
+    }
+
+    /// A contact with no context actions still gets a well-formed reply — the
+    /// launcher is waiting for one, and silence reads as a hang.
+    #[test]
+    fn an_empty_context_menu_is_still_a_valid_response() {
+        match parse(&context_message(0, &[])) {
+            PluginResponse::Context { options, .. } => assert!(options.is_empty()),
+            other => panic!("an empty context menu parsed as {other:?}"),
+        }
+    }
+
+    /// The two bare-string messages the plugin ends its turns with. If either
+    /// spelling were wrong the launcher would wait forever for a plugin that
+    /// had already finished.
+    #[test]
+    fn the_turn_enders_are_the_responses_they_claim_to_be() {
+        assert!(matches!(
+            parse(&json!("Finished")),
+            PluginResponse::Finished
+        ));
+        assert!(matches!(parse(&json!("Close")), PluginResponse::Close));
+    }
 }

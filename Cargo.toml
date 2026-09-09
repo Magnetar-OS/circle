@@ -91,6 +91,11 @@ cosmic-pim-caldav = { path = "../cosmic-pim/crates/cosmic-pim-caldav" }
 # mocking the store: the thing under test is that bytes survive a round trip
 # through the filesystem, which a mock cannot demonstrate.
 tempfile = "3"
+# The launcher plugin's wire format, checked against the types the actual
+# consumer deserialises into rather than against a local mirror of them. A
+# renamed field is otherwise invisible: pop-launcher ignores a message it
+# cannot read, so the plugin just silently stops working.
+pop-launcher = "1.2.7"
 
 [[bin]]
 name = "circle"
