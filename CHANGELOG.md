@@ -197,6 +197,14 @@ All notable changes to this project are documented here. The format follows
 - CI built on whatever `stable` was rather than the 1.98 the project declares:
   the workflow passed a toolchain to an action, which overrides
   `rust-toolchain.toml`.
+- The Rust version the manifest offered as supported was one nothing ever
+  built. `rust-toolchain.toml` pinned the channel `1.98`, which floats to the
+  newest 1.98.x, while `Cargo.toml` declared a 1.98.0 minimum — so every
+  build, local and CI, ran 1.98.1 and 1.98.0 was never exercised. Nothing
+  reported it, and nothing could: `rust-version` is a *minimum*, so a manifest
+  asking for more than the pinned channel is refused outright while one asking
+  for less builds in silence. Both are pinned to 1.98.1 now, and CI fails when
+  they disagree.
 - `circle --search=` now selects the person when the query names exactly one,
   which is what the launcher plugin's Enter always claimed to do. Two or more
   matches stay a list.
