@@ -136,6 +136,12 @@ All notable changes to this project are documented here. The format follows
   substrate; Circle now has a multi-card fixture and asserts, for every write
   it can perform, that the card it did not edit is byte-for-byte unchanged.
 - Deleting one contact out of a shared file deleted everybody else in it.
+- Two contacts whose ids differed only in a non-ASCII character shared one
+  notes file, so one person's history appeared on another's card — the CRM
+  store's file-name escape truncated each character to a single byte, which
+  makes `α` and `±` the same name. Notes on a contact with a non-ASCII id were
+  also unreadable after a restart, for the same reason in reverse. Both
+  predate any release.
 - **Re-importing an export deleted most of it.** Import matches a card to an
   existing contact by UID and writes to that contact's file — so importing a
   two-card export over itself wrote each card over the whole file in turn and

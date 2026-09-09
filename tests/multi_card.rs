@@ -262,6 +262,66 @@ FN:Ada, Countess of Lovelace\r\nEMAIL;TYPE=INTERNET:ada@example.org\r\nEND:VCARD
     assert!(fixture.card("ada@export").contains("Countess"));
 }
 
+/// Two people whose UIDs differ only where the file-name sanitiser is lossy
+/// must stay two people.
+///
+/// `a@x.com` and `a-x.com` both clean to `a-x.com`, so before the sanitiser
+/// carried a digest they named one file. The second import then landed in the
+/// first's file and the result was one record with the first's UID and the
+/// second's content — the same identity swap as the patcher bug, reached
+/// through a different door.
+///
+/// The same shape bites any two UIDs sharing a 120-character prefix, which is
+/// what a server that mints long opaque ids produces.
+#[test]
+fn uids_that_sanitise_alike_stay_separate_contacts() {
+    let dir = tempfile::tempdir().expect("scratch directory");
+    let mut store = ContactStore::open(&dir.path().join("contacts")).expect("open the store");
+    let book = store
+        .create_book("Imported", Rgb(0x84, 0x2b, 0xd2))
+        .expect("create a book");
+
+    let colliding = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:a@x.com\r\nFN:First Person\r\nEND:VCARD\r\n\
+BEGIN:VCARD\r\nVERSION:3.0\r\nUID:a-x.com\r\nFN:Second Person\r\nEND:VCARD\r\n";
+
+    let summary = store.import_vcf(colliding, &book.id).expect("import");
+    store.refresh();
+
+    assert_eq!(summary.added, 2, "both cards should have been added");
+    let files: std::collections::HashSet<&String> = summary.files.iter().collect();
+    assert_eq!(
+        files.len(),
+        2,
+        "the two uids were written to one file: {:?}",
+        summary.files
+    );
+
+    let contacts = store.contacts();
+    assert_eq!(contacts.len(), 2, "the import merged two people into one");
+
+    // Each record must carry its OWN name, not the other's. A count of two is
+    // not enough — the failure this guards against is a record keeping one
+    // uid while taking the other's content.
+    let first = contacts
+        .iter()
+        .find(|c| c.uid == "a@x.com")
+        .expect("the first uid survived");
+    let second = contacts
+        .iter()
+        .find(|c| c.uid == "a-x.com")
+        .expect("the second uid survived");
+    assert_eq!(
+        first.label(),
+        "First Person",
+        "the first record took the second's content"
+    );
+    assert_eq!(
+        second.label(),
+        "Second Person",
+        "the second record took the first's content"
+    );
+}
+
 /// Setting a photo goes through a different patcher than the field editor.
 #[test]
 fn setting_a_photo_on_one_contact_leaves_the_other_untouched() {

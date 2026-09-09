@@ -319,17 +319,33 @@ fn encode_key(card: &CardRef) -> String {
     format!("{}~{}", escape(&card.book), escape(&card.uid))
 }
 
+/// Escapes one half of a key, injectively.
+///
+/// Every byte of a character that is not safe in a file name is written as
+/// `_XX`, **the character's UTF-8 bytes** rather than its scalar value
+/// truncated to one. Truncating is not injective: `α` (U+03B1) and `±`
+/// (U+00B1) agree in their low byte, so they escaped alike and two people's
+/// notes landed in one file — one person's history showing up on another's
+/// card, which is the same failure as writing one record over another and
+/// looks just as much like nothing being wrong.
+///
+/// `_` is not in the safe set, so it escapes itself and cannot be confused
+/// with the marker it would otherwise be.
 fn escape(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
-                c.to_string()
-            } else {
-                format!("_{:02x}", c as u32 & 0xff)
+    use std::fmt::Write as _;
+
+    let mut out = String::with_capacity(value.len());
+    let mut buffer = [0u8; 4];
+    for c in value.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+            out.push(c);
+        } else {
+            for byte in c.encode_utf8(&mut buffer).as_bytes() {
+                let _ = write!(out, "_{byte:02x}");
             }
-        })
-        .collect()
+        }
+    }
+    out
 }
 
 fn decode_key(stem: &str) -> Option<CardRef> {
@@ -340,20 +356,33 @@ fn decode_key(stem: &str) -> Option<CardRef> {
     })
 }
 
+/// The inverse of [`escape`].
+///
+/// Escaped bytes are gathered and decoded as UTF-8 together, not one at a
+/// time: a multi-byte character is several `_XX` in a row, and turning each
+/// byte into its own `char` would decode `α` as two Latin-1 characters and
+/// silently file the record under an id nobody will look for again.
 fn unescape(value: &str) -> Option<String> {
     let mut out = String::with_capacity(value.len());
+    let mut bytes: Vec<u8> = Vec::new();
     let mut chars = value.chars();
+
     while let Some(c) = chars.next() {
         if c == '_' {
             let hex: String = chars.by_ref().take(2).collect();
             if hex.len() != 2 {
                 return None;
             }
-            let byte = u8::from_str_radix(&hex, 16).ok()?;
-            out.push(char::from(byte));
-        } else {
-            out.push(c);
+            bytes.push(u8::from_str_radix(&hex, 16).ok()?);
+            continue;
         }
+        if !bytes.is_empty() {
+            out.push_str(&String::from_utf8(std::mem::take(&mut bytes)).ok()?);
+        }
+        out.push(c);
+    }
+    if !bytes.is_empty() {
+        out.push_str(&String::from_utf8(bytes).ok()?);
     }
     Some(out)
 }
@@ -476,6 +505,62 @@ mod tests {
                 .unwrap_or(true),
             "an emptied record left a file behind"
         );
+    }
+
+    /// Two records must never share a file.
+    ///
+    /// The file name is a map from (book, uid) to a string, and a map that is
+    /// not injective silently merges the things it collides — here, one
+    /// person's notes appearing on another person's card. `α` (U+03B1) and
+    /// `±` (U+00B1) are the cheap demonstration: they differ only above the
+    /// low byte, which is exactly what a truncating escape throws away.
+    #[test]
+    fn ids_that_differ_only_above_the_low_byte_get_different_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let alpha = card("personal", "\u{3b1}");
+        let plusminus = card("personal", "\u{b1}");
+        assert_ne!(alpha, plusminus, "the fixture stopped testing two ids");
+
+        let mut store = CrmStore::open(dir.path());
+        store.add_note(&alpha, "About alpha", Utc::now()).unwrap();
+        store
+            .add_note(&plusminus, "About plus-minus", Utc::now())
+            .unwrap();
+
+        let files = std::fs::read_dir(dir.path().join(".crm")).unwrap().count();
+        assert_eq!(files, 2, "two contacts' notes were written to one file");
+
+        let reopened = CrmStore::open(dir.path());
+        assert_eq!(
+            reopened.record(&alpha).unwrap().notes[0].text,
+            "About alpha"
+        );
+        assert_eq!(
+            reopened.record(&plusminus).unwrap().notes[0].text,
+            "About plus-minus"
+        );
+    }
+
+    /// A uid is arbitrary text, and plenty of it is not ASCII. A note written
+    /// against one has to still be there after a restart.
+    #[test]
+    fn a_non_ascii_id_round_trips_through_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let giorgos = card(
+            "\u{3c0}\u{3b5}\u{3c1}\u{3c3}",
+            "\u{393}\u{3b9}\u{3ce}\u{3c1}\u{3b3}\u{3bf}\u{3c2}@x",
+        );
+
+        let mut store = CrmStore::open(dir.path());
+        store
+            .add_note(&giorgos, "Owes me a lyre lesson", Utc::now())
+            .unwrap();
+
+        let reopened = CrmStore::open(dir.path());
+        let record = reopened
+            .record(&giorgos)
+            .expect("the record came back under the id it was written with");
+        assert_eq!(record.notes[0].text, "Owes me a lyre lesson");
     }
 
     /// A UID is arbitrary text and routinely carries `@` and `/`; without
