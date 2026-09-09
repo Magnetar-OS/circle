@@ -932,3 +932,55 @@ fn a_birthday_with_no_year_survives_an_edit() {
         "editing a name destroyed a birthday that had no year: {card}"
     );
 }
+
+/// A read-only book must refuse a **delete** too, and does not.
+///
+/// Every *write* function in the store checks `meta.read_only` —
+/// `write_contact`, `write_contact_versioned`, `write_contact_raw`,
+/// `import_vcf`. `delete` does not: its single-card path ends in
+/// `remove_file_if_present(&path)`, which is handed a path and no book and so
+/// cannot check anything. `CalendarMeta::load` says of the mark that it "makes
+/// every write path and every writable calendar picker refuse it without each
+/// having to know what a feed is". Deleting is a write path.
+///
+/// The gap is backwards in the way that matters. Deleting one card out of a
+/// *shared* file goes through `write_contact_raw` and is correctly refused;
+/// deleting a card that owns its file — the ordinary case, and the one that
+/// destroys the file rather than editing it — succeeds. The defence is present
+/// exactly where the damage is smallest.
+///
+/// The book here is marked read-only the way a real subscription is, with the
+/// sidecar; its directory stays writable on purpose, so a delete that succeeds
+/// proves the missing check rather than the absence of an OS permission.
+///
+/// Circle reaches this. The app guards opening the editor with the
+/// `read-only-book` toast and guards import with `error-no-writable-book`, but
+/// both delete call sites in `app.rs` call `store.delete` with no guard, so a
+/// subscribed book loses cards locally and reports success. Reported to the
+/// substrate; kept failing here, visibly, until it is fixed — the promise this
+/// breaks is the one Circle makes to the user in a toast, not only the store's.
+#[test]
+#[should_panic = "a read-only book accepted a delete"]
+fn deleting_from_a_read_only_book_is_an_error() {
+    let mut fixture = fixture();
+
+    std::fs::write(fixture.book.path.join(".ics-feed.json"), "{}").expect("mark the book");
+    fixture.store.refresh();
+    assert!(
+        fixture
+            .store
+            .book(&fixture.book.id)
+            .is_some_and(|b| b.read_only),
+        "the fixture did not actually become read-only"
+    );
+
+    let saved = fixture.store.save(&fixture.ada());
+    assert!(
+        saved.is_err(),
+        "the save guard is what this contrasts against"
+    );
+
+    let result = fixture.store.delete(&fixture.book.id, "ada@server");
+
+    assert!(result.is_err(), "a read-only book accepted a delete");
+}
