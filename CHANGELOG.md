@@ -187,6 +187,11 @@ All notable changes to this project are documented here. The format follows
   carries only the deleted card, and puts it back into whatever the file holds
   by then.
 
+- Icons are named for the application id and installed where the freedesktop
+  spec and COSMIC's panel look for them: `com.magnetaros.Circle.svg` scalable,
+  PNGs rasterised from it at eight sizes through 512, and a monochrome
+  `-symbolic` variant for the panel and the app grid. The justfile, the flatpak
+  manifest and the metainfo install and reference the same names.
 - Circle was shipping Slate's calendar icon — byte for byte the same file, so
   a contacts application showed a calendar in the applications menu, on the
   panel, in its own About page, and in the software centre. Replaced with a

@@ -20,11 +20,12 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 desktop-src := cargo-target-dir / 'xdgen' / 'app.desktop'
 metainfo-src := cargo-target-dir / 'xdgen' / 'app.metainfo.xml'
 icon-dir := 'resources' / 'icons' / 'hicolor'
-icon-src := icon-dir / 'scalable' / 'apps' / 'icon.svg'
-# One SVG per size, drawn on the pixel grid at that size rather than scaled
-# down from the detailed one — the higher-effort option the first-party COSMIC
-# apps take, and the difference between a crisp panel icon and a smudge.
-icon-sizes := '16 24 32 48 64'
+icon-src := icon-dir / 'scalable' / 'apps' / (appid + '.svg')
+icon-symbolic-src := icon-dir / 'symbolic' / 'apps' / (appid + '-symbolic.svg')
+# The scalable SVG is what modern toolkits pick up; the PNGs are rasterised
+# from it at each size so the panel and the icon grid get pixel-exact art
+# instead of a downscaled smudge.
+icon-sizes := '16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512'
 launcher-plugin-src := 'resources' / 'launcher' / 'plugin.ron'
 
 # Install destinations
@@ -34,6 +35,7 @@ desktop-dst := base-dir / 'share' / 'applications' / (appid + '.desktop')
 metainfo-dst := base-dir / 'share' / 'metainfo' / (appid + '.metainfo.xml')
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
 icon-dst := icons-dst / 'scalable' / 'apps' / (appid + '.svg')
+icon-symbolic-dst := icons-dst / 'symbolic' / 'apps' / (appid + '-symbolic.svg')
 launcher-bin-dst := base-dir / 'bin' / launcher
 # pop-launcher discovers plugins under share/pop-launcher/plugins/<name>/.
 launcher-plugin-dst := base-dir / 'share' / 'pop-launcher' / 'plugins' / name / 'plugin.ron'
@@ -121,9 +123,10 @@ install: build-release
     install -Dm0644 {{desktop-src}} {{desktop-dst}}
     install -Dm0644 {{metainfo-src}} {{metainfo-dst}}
     install -Dm0644 {{icon-src}} {{icon-dst}}
+    install -Dm0644 {{icon-symbolic-src}} {{icon-symbolic-dst}}
     for size in {{icon-sizes}}; do \
-        install -Dm0644 {{icon-dir}}/$size/apps/icon.svg \
-            {{icons-dst}}/$size/apps/{{appid}}.svg; \
+        install -Dm0644 {{icon-dir}}/$size/apps/{{appid}}.png \
+            {{icons-dst}}/$size/apps/{{appid}}.png; \
     done
     install -Dm0644 {{launcher-plugin-src}} {{launcher-plugin-dst}}
     if [ -z '{{rootdir}}' ]; then \
@@ -134,8 +137,9 @@ install: build-release
 # Uninstalls installed files
 uninstall:
     rm -f {{bin-dst}} {{launcher-bin-dst}} {{desktop-dst}} {{metainfo-dst}} {{icon-dst}} {{launcher-plugin-dst}}
+    rm -f {{icon-symbolic-dst}}
     for size in {{icon-sizes}}; do \
-        rm -f {{icons-dst}}/$size/apps/{{appid}}.svg; \
+        rm -f {{icons-dst}}/$size/apps/{{appid}}.png; \
     done
 
 # Vendor dependencies locally

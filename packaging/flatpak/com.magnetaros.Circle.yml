@@ -56,12 +56,14 @@ modules:
         /app/share/applications/com.magnetaros.Circle.desktop
       - install -Dm0644 target/xdgen/app.metainfo.xml
         /app/share/metainfo/com.magnetaros.Circle.metainfo.xml
-      - install -Dm0644 resources/icons/hicolor/scalable/apps/icon.svg
+      - install -Dm0644 resources/icons/hicolor/scalable/apps/com.magnetaros.Circle.svg
         /app/share/icons/hicolor/scalable/apps/com.magnetaros.Circle.svg
-      # One SVG per size, as the justfile installs them.
-      - for size in 16 24 32 48 64; do install -Dm0644
-        "resources/icons/hicolor/$size/apps/icon.svg"
-        "/app/share/icons/hicolor/$size/apps/com.magnetaros.Circle.svg"; done
+      - install -Dm0644 resources/icons/hicolor/symbolic/apps/com.magnetaros.Circle-symbolic.svg
+        /app/share/icons/hicolor/symbolic/apps/com.magnetaros.Circle-symbolic.svg
+      # One PNG per size, as the justfile installs them.
+      - for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do install -Dm0644
+        "resources/icons/hicolor/$size/apps/com.magnetaros.Circle.png"
+        "/app/share/icons/hicolor/$size/apps/com.magnetaros.Circle.png"; done
     sources:
       - type: dir
         path: ../..
