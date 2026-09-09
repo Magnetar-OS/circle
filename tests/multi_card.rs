@@ -322,6 +322,96 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:a-x.com\r\nFN:Second Person\r\nEND:VCARD\r\n";
     );
 }
 
+/// Exporting a book that holds a multi-card file must emit each person once.
+///
+/// The read-out verb, which no sweep of writes, deletes or creates would
+/// reach. `Contact::raw` is the whole document, so concatenating every
+/// contact's `raw` emits an N-card file N times — and the export is then
+/// re-importable, which turns a duplication into whatever the import makes of
+/// it.
+#[test]
+fn exporting_a_book_emits_each_person_once() {
+    let fixture = fixture();
+
+    let exported = fixture
+        .store
+        .export_book(&fixture.book.id)
+        .expect("export the book");
+
+    assert_eq!(
+        exported.matches("BEGIN:VCARD").count(),
+        2,
+        "a two-card book exported as {} cards",
+        exported.matches("BEGIN:VCARD").count()
+    );
+    assert_eq!(exported.matches("UID:ada@export").count(), 1, "{exported}");
+    assert_eq!(
+        exported.matches("UID:charles@export").count(),
+        1,
+        "{exported}"
+    );
+    assert!(
+        exported.contains("X-ADA-ONLY:kept"),
+        "the export dropped a property"
+    );
+    assert!(exported.contains("X-CHARLES-ONLY:also kept"));
+}
+
+/// An export must be re-importable into an empty book and produce the people
+/// it came from — which is only true if it emitted each of them once.
+#[test]
+fn an_export_round_trips_into_an_empty_book() {
+    let fixture = fixture();
+    let exported = fixture.store.export_book(&fixture.book.id).expect("export");
+
+    let dir = tempfile::tempdir().expect("scratch directory");
+    let mut fresh = ContactStore::open(&dir.path().join("contacts")).expect("open");
+    let book = fresh
+        .create_book("Restored", Rgb(0x2d, 0x7d, 0xd2))
+        .expect("create a book");
+    fresh
+        .import_vcf(&exported, &book.id)
+        .expect("import the export");
+    fresh.refresh();
+
+    let restored = fresh.contacts();
+    assert_eq!(
+        restored.len(),
+        2,
+        "the export round-tripped to {} people",
+        restored.len()
+    );
+}
+
+/// Circle's bulk export — the Select-then-Export path — slices the same way,
+/// and is the one a user reaches with a multi-card book in front of them.
+///
+/// Exercised through the same helper the shell uses, since the shell's own
+/// copy is a `view` concern that cannot be driven from a test.
+#[test]
+fn exporting_a_selection_emits_each_person_once() {
+    let fixture = fixture();
+
+    let mut text = String::new();
+    for contact in fixture.store.contacts() {
+        let card = cosmic_pim_core::vcard::card_segment(&contact.raw, &contact.uid)
+            .expect("each contact's own card");
+        text.push_str(&card);
+        if !card.ends_with('\n') {
+            text.push_str("\r\n");
+        }
+    }
+
+    assert_eq!(
+        text.matches("BEGIN:VCARD").count(),
+        2,
+        "selecting two people exported {} cards",
+        text.matches("BEGIN:VCARD").count()
+    );
+    assert_eq!(text.matches("UID:ada@export").count(), 1);
+    assert_eq!(text.matches("UID:charles@export").count(), 1);
+}
+
 /// Setting a photo goes through a different patcher than the field editor.
 #[test]
 fn setting_a_photo_on_one_contact_leaves_the_other_untouched() {

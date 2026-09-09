@@ -1692,16 +1692,20 @@ impl AppModel {
                     .iter()
                     .filter(|c| self.checked.contains(&ContactKey::of(c)))
                 {
-                    if contact.raw.trim().is_empty() {
-                        text.push_str(&cosmic_pim_core::vcard::to_vcard_versioned(
+                    // This contact's own card, not the file it lives in — a
+                    // `.vcf` may hold several people, and pushing `raw` would
+                    // emit all of them once per person selected.
+                    let card = if contact.raw.trim().is_empty() {
+                        cosmic_pim_core::vcard::to_vcard_versioned(
                             contact,
                             cosmic_pim_core::vcard::WriteVersion::default(),
-                        ));
+                        )
                     } else {
-                        text.push_str(&contact.raw);
-                        if !contact.raw.ends_with('\n') {
-                            text.push_str("\r\n");
-                        }
+                        card_segment(&contact.raw, &contact.uid)
+                    };
+                    text.push_str(&card);
+                    if !card.ends_with('\n') {
+                        text.push_str("\r\n");
                     }
                 }
                 match std::fs::write(&path, text) {
@@ -3229,19 +3233,13 @@ fn photo_mime(path: &std::path::Path) -> &'static str {
 
 /// One card's own text, sliced out of a document that may hold several.
 ///
-/// [`Contact::raw`] is the whole file, because that is what the parser hands
-/// back. Everything that stores a card for later — the undo entry — wants
-/// only the card.
+/// Thin wrapper over the substrate's, which owns the slicing. The fallback is
+/// this application's decision: a document with no cards, or one this uid does
+/// not name, keeps the original. For an undo that is the safe answer —
+/// restoring too much is recoverable, restoring nothing is not — and for an
+/// export it emits a card rather than nothing.
 fn card_segment(raw: &str, uid: &str) -> String {
-    use cosmic_pim_core::vcard::{split_vcards, vcard_index_of};
-
-    match vcard_index_of(raw, uid).and_then(|index| split_vcards(raw).into_iter().nth(index)) {
-        Some(segment) => segment,
-        // A document with no cards, or one this uid does not name. Keeping the
-        // original is the safe answer: an undo that restores too much is
-        // recoverable, one that restores nothing is not.
-        None => raw.to_owned(),
-    }
+    cosmic_pim_core::vcard::card_segment(raw, uid).unwrap_or_else(|| raw.to_owned())
 }
 
 /// A deleted card put back into whatever its file now holds.
