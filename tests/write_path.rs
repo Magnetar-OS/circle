@@ -602,3 +602,88 @@ fn a_queued_edit_carries_its_pre_edit_base_and_the_first_base_sticks() {
          and merging against the second would silently drop the first edit"
     );
 }
+
+/// A parameter the model does not name, on a property the model rewrites.
+///
+/// Every other fixture here tests unmodelled *properties* — PHOTO, GEO,
+/// `X-ABShowAs` — which survive because the patcher never touches their
+/// lines. A parameter is a different question: it rides on a line the patcher
+/// does rewrite, so preserving it means keeping part of a line while
+/// replacing the rest.
+///
+/// Real cards carry these. `EMAIL;TYPE=work;X-SERVICE=slack:` is what a
+/// contact synced from a client with service integrations looks like. The
+/// question was worth asking here because a sibling application lost exactly
+/// this shape — `SUMMARY;LANGUAGE=en-gb` exporting as plain `SUMMARY` — to a
+/// re-serialising path, and Circle's whole promise is that it patches instead.
+const PARAMETERISED: &str = "BEGIN:VCARD\r\n\
+VERSION:4.0\r\n\
+UID:ada@params\r\n\
+FN:Ada Lovelace\r\n\
+N:Lovelace;Ada;;;\r\n\
+EMAIL;TYPE=work;X-SERVICE=slack:ada@work.example\r\n\
+TEL;TYPE=cell;X-CARRIER=cosmote:+30 694 1234567\r\n\
+END:VCARD\r\n";
+
+/// **Known gap, not yet fixed.** Kept as executable documentation: it names
+/// the defect precisely and becomes the acceptance test the day it is closed.
+/// `cargo test` reports it as ignored on every run, so it does not go quiet.
+///
+/// The fix is a model change in the substrate — `Typed` carries `value`,
+/// `types`, `pref` and `group`, and the patcher regenerates each modelled
+/// line from exactly those, so a parameter with nowhere to live is dropped.
+/// The shape to copy already exists there: events keep what the model does
+/// not name in a verbatim `other`. Doing that for `Typed` touches the parser,
+/// the writer and eighteen construction sites across two repositories, which
+/// is a deliberate change rather than a patch.
+#[ignore = "known gap: the patcher regenerates modelled lines and drops their unmodelled parameters"]
+#[test]
+fn parameters_on_untouched_lines_survive_an_edit() {
+    use cosmic_pim_core::vcard::{parse_vcards, patch_vcard};
+
+    let mut contact = parse_vcards(PARAMETERISED, "book", "ada.vcf").remove(0);
+    // Edit a field nowhere near the parameterised lines.
+    contact.display_name = "Ada, Countess of Lovelace".into();
+
+    let patched = patch_vcard(&contact.raw, &contact).expect("the card patches");
+
+    assert!(
+        patched.contains("Countess"),
+        "the edit did not land: {patched}"
+    );
+    assert!(
+        patched.contains("X-SERVICE=slack"),
+        "editing a name dropped a parameter from an untouched EMAIL line: {patched}"
+    );
+    assert!(
+        patched.contains("X-CARRIER=cosmote"),
+        "editing a name dropped a parameter from an untouched TEL line: {patched}"
+    );
+}
+
+/// The harder half: the parameter sits on a line whose **value** is being
+/// rewritten, so it cannot be preserved by leaving the line alone.
+/// The harder half of the same gap: preserving a parameter here cannot be
+/// done by leaving the line alone, so a fix needs a join between the old
+/// lines and the new values. Value equality works when the value is
+/// unchanged; this case is what makes position or an explicit identity
+/// necessary.
+#[ignore = "known gap: see parameters_on_untouched_lines_survive_an_edit"]
+#[test]
+fn parameters_survive_a_rewrite_of_the_value_they_sit_on() {
+    use cosmic_pim_core::vcard::{parse_vcards, patch_vcard};
+
+    let mut contact = parse_vcards(PARAMETERISED, "book", "ada.vcf").remove(0);
+    contact.emails[0].value = "ada@newwork.example".into();
+
+    let patched = patch_vcard(&contact.raw, &contact).expect("the card patches");
+
+    assert!(
+        patched.contains("ada@newwork.example"),
+        "the edit did not land: {patched}"
+    );
+    assert!(
+        patched.contains("X-SERVICE=slack"),
+        "changing an address dropped the service parameter beside it: {patched}"
+    );
+}
