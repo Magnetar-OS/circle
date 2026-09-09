@@ -96,6 +96,10 @@ tempfile = "3"
 # renamed field is otherwise invisible: pop-launcher ignores a message it
 # cannot read, so the plugin just silently stops working.
 pop-launcher = "1.2.7"
+# The QR code's SVG is assembled by hand, so it is checked with the parser
+# that actually renders it rather than by inspecting the text it was built
+# from. Already in the graph through libcosmic.
+usvg = "0.45"
 
 [[bin]]
 name = "circle"

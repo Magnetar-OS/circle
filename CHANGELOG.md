@@ -127,6 +127,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The QR code's size limit was taken from the specification rather than from
+  the encoder, and the two disagree — 2 953 bytes against the 2 331 the
+  encoder actually accepts. A contact between the two passed the check and
+  then failed to encode. The limit is measured now, by a test that finds it by
+  bisection so it cannot drift.
+
 - The QR code wrote a display heading into the card's `ORG` field, so a phone
   scanning a contact with a job title filed them under a company literally
   named "Mathematician, Acme". `ORG` now carries the company and its

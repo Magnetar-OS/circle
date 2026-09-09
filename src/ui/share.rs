@@ -28,10 +28,19 @@ use cosmic::widget;
 use crate::fl;
 use crate::ui::person::Composed;
 
-/// The most bytes a QR code can carry in byte mode at the lowest error
-/// correction — version 40, level L. Past this the encoder fails, so the
-/// payload is trimmed before it gets there.
-const QR_CAPACITY: usize = 2_953;
+/// The most bytes this encoder accepts.
+///
+/// **Measured, not reasoned.** The specification's byte-mode maximum is 2 953
+/// — version 40 at error correction L — and that number is wrong here,
+/// because `QrCode::new` chooses level M, whose maximum is 2 331. Taking the
+/// figure from the specification let a payload between the two pass this
+/// guard and then fail to encode, turning a card that should have been
+/// refused with a reason into a `None` the caller reported as "too much in
+/// it" anyway. Right answer, wrong route.
+///
+/// `the_capacity_constant_matches_what_the_encoder_accepts` finds the real
+/// limit by bisection, so this cannot drift if the crate changes its default.
+const QR_CAPACITY: usize = 2_331;
 
 /// The card a QR code carries: enough to file the person, small enough to
 /// scan.
@@ -362,5 +371,98 @@ mod tests {
     #[test]
     fn an_oversized_payload_is_refused_rather_than_drawn_wrong() {
         assert!(qr_svg(&"x".repeat(QR_CAPACITY + 1)).is_none());
+    }
+}
+
+#[cfg(test)]
+mod svg_tests {
+    use super::*;
+
+    /// The SVG is assembled by hand, so it is checked with the parser that
+    /// actually renders it.
+    ///
+    /// Every other assertion about it — the viewBox, the quiet zone — is a
+    /// `contains` on a string this module had just built, and none of them can
+    /// tell a drawable document from a plausible-looking one. The path data is
+    /// concatenated from thousands of `M x y h1v1h-1z` fragments; one bad
+    /// coordinate makes a code that renders blank, and blank is exactly what a
+    /// user cannot distinguish from "the camera did not pick it up".
+    ///
+    /// `usvg` is the parser underneath the widget this SVG is handed to, so
+    /// this is the consumer's own reader rather than a second opinion.
+    fn parse(svg: &str) -> usvg::Tree {
+        usvg::Tree::from_str(svg, &usvg::Options::default())
+            .unwrap_or_else(|why| panic!("the renderer cannot read this SVG: {why}\n{svg}"))
+    }
+
+    fn payload() -> String {
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\n\
+         EMAIL;TYPE=INTERNET:ada@example.org\r\nEND:VCARD\r\n"
+            .to_owned()
+    }
+
+    #[test]
+    fn the_code_is_an_svg_the_renderer_can_read() {
+        let svg = qr_svg(&payload()).expect("encode");
+        let tree = parse(&svg);
+
+        let size = tree.size();
+        assert!(size.width() > 0.0 && size.height() > 0.0, "{size:?}");
+        assert!(
+            (size.width() - size.height()).abs() < f32::EPSILON,
+            "a QR code must be square, got {size:?}"
+        );
+    }
+
+    /// A document that parses but draws nothing is the failure this is really
+    /// guarding: the modules are one long path, and an unparseable `d`
+    /// attribute is dropped rather than rejected.
+    #[test]
+    fn the_modules_survive_as_actual_geometry() {
+        let svg = qr_svg(&payload()).expect("encode");
+        let tree = parse(&svg);
+
+        let paths = tree
+            .root()
+            .children()
+            .iter()
+            .filter(|node| matches!(node, usvg::Node::Path(_)))
+            .count();
+        assert!(
+            paths >= 2,
+            "expected the background and the modules to survive parsing, got {paths} paths"
+        );
+    }
+
+    /// The smallest and largest codes exercise different geometry, and the
+    /// largest is where a concatenated path is most likely to go wrong.
+    /// Finds the largest payload `QrCode::new` actually accepts, which is
+    /// the number the guard has to agree with.
+    #[test]
+    fn the_capacity_constant_matches_what_the_encoder_accepts() {
+        let accepts = |n: usize| qrcode::QrCode::new("x".repeat(n).as_bytes()).is_ok();
+
+        let (mut lo, mut hi) = (1usize, 4096usize);
+        while lo < hi {
+            let mid = lo.midpoint(hi + 1);
+            if accepts(mid) { lo = mid } else { hi = mid - 1 }
+        }
+        assert_eq!(
+            QR_CAPACITY, lo,
+            "QR_CAPACITY says {QR_CAPACITY} but the encoder accepts at most {lo}; \
+             a payload between them passes the guard and then fails to encode"
+        );
+    }
+
+    #[test]
+    fn codes_of_every_size_parse() {
+        for length in [1usize, 100, 1000, QR_CAPACITY] {
+            let svg = qr_svg(&"x".repeat(length)).expect("encode");
+            let tree = parse(&svg);
+            assert!(
+                tree.size().width() > 0.0,
+                "a {length}-byte payload drew nothing"
+            );
+        }
     }
 }
