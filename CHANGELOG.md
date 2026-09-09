@@ -136,6 +136,12 @@ All notable changes to this project are documented here. The format follows
   substrate; Circle now has a multi-card fixture and asserts, for every write
   it can perform, that the card it did not edit is byte-for-byte unchanged.
 - Deleting one contact out of a shared file deleted everybody else in it.
+- **Re-importing an export deleted most of it.** Import matches a card to an
+  existing contact by UID and writes to that contact's file — so importing a
+  two-card export over itself wrote each card over the whole file in turn and
+  left one contact. The card is now replaced inside the file, leaving its
+  neighbours untouched. This is the promise "re-importing the same export
+  updates rather than duplicates" doing the opposite of what it said.
 - Setting a photo, or a group's membership, on one contact in a shared file
   wrote it onto a different contact's card.
 - Undoing a delete overwrote the whole file, silently reverting any edit made

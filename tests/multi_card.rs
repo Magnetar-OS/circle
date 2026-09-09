@@ -200,6 +200,68 @@ fn deleting_one_contact_leaves_the_others_in_the_file() {
     );
 }
 
+/// Re-importing the export a file came from must update the people in it, not
+/// leave one of them.
+///
+/// This is the promise the README makes about import — "UID-keyed, so
+/// re-importing the same export updates rather than duplicates" — and it is
+/// made about exactly the file shape an export has.
+#[test]
+fn reimporting_the_export_keeps_everybody_in_it() {
+    let mut fixture = fixture();
+
+    let summary = fixture
+        .store
+        .import_vcf(TWO_CARDS, &fixture.book.id)
+        .expect("re-import the same export");
+    fixture.store.refresh();
+
+    assert_eq!(summary.updated, 2, "both cards should have been recognised");
+    assert_eq!(summary.added, 0, "a re-import should add nobody");
+
+    let after = fixture.store.contacts();
+    assert_eq!(
+        after.len(),
+        2,
+        "re-importing a two-card export left {} of the two people",
+        after.len()
+    );
+    assert!(fixture.card("ada@export").contains("X-ADA-ONLY:kept"));
+    assert!(
+        fixture
+            .card("charles@export")
+            .contains("X-CHARLES-ONLY:also kept")
+    );
+}
+
+/// Importing an updated export must change the person it names and leave the
+/// people it shares a file with alone.
+#[test]
+fn importing_an_update_for_one_person_keeps_the_other() {
+    let mut fixture = fixture();
+    let charles_before = fixture.card("charles@export");
+
+    let just_ada = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada@export\r\n\
+FN:Ada, Countess of Lovelace\r\nEMAIL;TYPE=INTERNET:ada@example.org\r\nEND:VCARD\r\n";
+    fixture
+        .store
+        .import_vcf(just_ada, &fixture.book.id)
+        .expect("import Ada's update");
+    fixture.store.refresh();
+
+    assert_eq!(
+        fixture.store.contacts().len(),
+        2,
+        "importing Ada removed Charles"
+    );
+    assert_eq!(
+        fixture.card("charles@export"),
+        charles_before,
+        "importing Ada rewrote Charles's card"
+    );
+    assert!(fixture.card("ada@export").contains("Countess"));
+}
+
 /// Setting a photo goes through a different patcher than the field editor.
 #[test]
 fn setting_a_photo_on_one_contact_leaves_the_other_untouched() {
