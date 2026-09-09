@@ -16,6 +16,19 @@
 //! this is a transfer format, and pretending otherwise would produce a code
 //! nothing can scan.
 //!
+//! # Why the payload is not folded
+//!
+//! RFC 2426 says a line SHOULD be folded at 75 octets, and this does not fold
+//! at all. Deliberate, for two reasons that only apply here: a fold costs
+//! three bytes and the capacity is 2 331, so folding spends the budget that
+//! decides whether a contact fits at all; and the readers are phone cameras,
+//! which handle unfolded lines universally. SHOULD, not MUST.
+//!
+//! It is written down because an undecided-looking absence and a decision
+//! look identical in code. `a_greek_contact_with_long_values_parses_back_whole`
+//! is the check that this stays true for values long enough to want folding,
+//! in a script where octets and characters differ.
+//!
 //! vCard **3.0** regardless of the setting, because it is what phone cameras
 //! and every contacts app read without complaint. A 4.0 payload is legal and
 //! less widely understood, and this is the one place where the receiving end
@@ -112,16 +125,14 @@ fn line(property: &str, value: &str) -> String {
 
 /// vCard's own escaping: backslash, comma, semicolon, and newline.
 ///
-/// Missing this is how a contact called `Lovelace, Ada` becomes two values
-/// on the receiving phone.
-fn escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace(';', "\\;")
-        .replace(',', "\\,")
-        .replace('\n', "\\n")
-        .replace('\r', "")
-}
+/// Missing this is how a contact called `Lovelace, Ada` becomes two values on
+/// the receiving phone.
+///
+/// The substrate's, not a second copy. It made this public for exactly this
+/// reason — its own writeback patcher must escape identically — and a rule
+/// with two implementations in one program has two places to drift, which is
+/// the drift nobody notices because both look right in isolation.
+use cosmic_pim_core::ical::escape_text as escape;
 
 /// The QR code as an SVG document, or `None` when the payload will not fit
 /// even after trimming.
@@ -287,6 +298,120 @@ mod tests {
             .expect("parses");
 
         assert_eq!(back.label(), "Lovelace, Ada; Countess");
+    }
+
+    /// Every other test here feeds short ASCII, which cannot reach two
+    /// properties they are named for: that the escaping survives a multibyte
+    /// value, and that a value long enough to want folding still parses.
+    ///
+    /// This project's user writes Greek. A test that can only exercise a
+    /// property with input it never supplies is a test that names the right
+    /// thing and cannot see it.
+    /// Every character the escaper treats specially, through a real parser.
+    ///
+    /// The escaping is the substrate's now rather than a second copy, and the
+    /// point of a shared rule is that a change to it surfaces in every caller
+    /// — which it can only do if each caller covers the rule rather than
+    /// assuming it.
+    #[test]
+    fn every_escaped_character_survives_a_round_trip() {
+        let awkward = "back\\slash semi;colon comma,here";
+        let mut card = ada();
+        card.display_name = awkward.into();
+        card.name.family = "semi;colon".into();
+
+        let cards = [(&card, "Personal")];
+        let payload = vcard(&crate::ui::person::compose(&cards).expect("compose"));
+        let back = cosmic_pim_core::vcard::parse_vcards(&payload, "book", "x.vcf")
+            .pop()
+            .expect("parses");
+
+        assert_eq!(
+            back.label(),
+            awkward,
+            "an escaped character did not survive"
+        );
+        assert_eq!(
+            back.name.family, "semi;colon",
+            "a semicolon inside a name component split it into two components"
+        );
+    }
+
+    /// A carriage return is dropped rather than escaped, so a value that
+    /// arrived with CRLF in it cannot inject a line break into the payload.
+    #[test]
+    fn a_value_containing_a_line_break_cannot_break_the_payload() {
+        let mut card = ada();
+        card.display_name = "Ada\r\nEMAIL:injected@example.org".into();
+
+        let cards = [(&card, "Personal")];
+        let payload = vcard(&crate::ui::person::compose(&cards).expect("compose"));
+        let back = cosmic_pim_core::vcard::parse_vcards(&payload, "book", "x.vcf")
+            .pop()
+            .expect("parses");
+
+        assert_eq!(
+            back.emails.len(),
+            1,
+            "a line break in a value forged a property: {payload}"
+        );
+        assert_eq!(back.emails[0].value, "ada@example.org");
+    }
+
+    #[test]
+    fn a_greek_contact_with_long_values_parses_back_whole() {
+        let name = "\u{393}\u{3b9}\u{3ce}\u{3c1}\u{3b3}\u{3bf}\u{3c2} \u{3a0}\u{3b1}\u{3c0}\u{3b1}\u{3b4}\u{3cc}\u{3c0}\u{3bf}\u{3c5}\u{3bb}\u{3bf}\u{3c2}";
+        // Comfortably past the 75 octets RFC 2426 folds at, and in a script
+        // where octets and characters differ.
+        let street = "\u{39b}\u{3b5}\u{3c9}\u{3c6}\u{3cc}\u{3c1}\u{3bf}\u{3c5} \u{39a}\u{3b1}\u{3bb}\u{3bb}\u{3b9}\u{3b3}\u{3ac} 128, \u{386}\u{3bd}\u{3c9} \u{393}\u{3bb}\u{3c5}\u{3c6}\u{3ac}\u{3b4}\u{3b1}, \u{391}\u{3b8}\u{3ae}\u{3bd}\u{3b1}";
+
+        let mut card = ada();
+        card.display_name = name.into();
+        card.name.family =
+            "\u{3a0}\u{3b1}\u{3c0}\u{3b1}\u{3b4}\u{3cc}\u{3c0}\u{3bf}\u{3c5}\u{3bb}\u{3bf}\u{3c2}"
+                .into();
+        card.name.given = "\u{393}\u{3b9}\u{3ce}\u{3c1}\u{3b3}\u{3bf}\u{3c2}".into();
+        card.addresses.push(cosmic_pim_core::model::Address {
+            street: street.into(),
+            locality: "\u{391}\u{3b8}\u{3ae}\u{3bd}\u{3b1}".into(),
+            country: "\u{395}\u{3bb}\u{3bb}\u{3ac}\u{3b4}\u{3b1}".into(),
+            ..Default::default()
+        });
+
+        let cards = [(&card, "Personal")];
+        let composed = crate::ui::person::compose(&cards).expect("compose");
+        let payload = vcard(&composed);
+
+        assert!(
+            payload.len() > street.len(),
+            "the address never reached the payload"
+        );
+
+        let back = cosmic_pim_core::vcard::parse_vcards(&payload, "book", "x.vcf")
+            .pop()
+            .expect("a Greek payload parses as a vCard");
+
+        assert_eq!(
+            back.label(),
+            name,
+            "the name did not survive the round trip"
+        );
+        assert_eq!(
+            back.name.given,
+            "\u{393}\u{3b9}\u{3ce}\u{3c1}\u{3b3}\u{3bf}\u{3c2}"
+        );
+        assert_eq!(
+            back.addresses.first().map(|a| a.street.as_str()),
+            Some(street),
+            "a long multibyte street did not survive"
+        );
+
+        // And it still fits a code, which is the only reason the payload is
+        // rebuilt rather than copied.
+        assert!(
+            qr_svg(&payload).is_some(),
+            "a Greek contact of ordinary size does not fit in a QR code"
+        );
     }
 
     #[test]
