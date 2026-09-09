@@ -185,8 +185,7 @@ impl Plugin {
             // transient scope — so the window is the session's, not this
             // plugin's, which pop-launcher owns and reaps. No activation
             // token: a plugin owns no surface to bind one to.
-            let quoted = contact.label().replace('\'', "'\\''");
-            let exec = format!("circle '--search={quoted}'");
+            let exec = search_exec(&contact.label());
             match self.runtime.as_ref() {
                 Some(runtime) => runtime.block_on(cosmic::desktop::spawn_desktop_exec(
                     exec,
@@ -288,6 +287,24 @@ fn copy_to_clipboard(value: &str) {
     }
 }
 
+/// The command line that opens one contact in Circle.
+///
+/// The label is other people's data — it arrives from whatever a CardDAV
+/// server chose to store — and it is being placed into a string that is
+/// parsed into arguments and spawned. Quoting it wrong is argument injection,
+/// not merely a mangled search: Circle treats a bare argument as a `.vcf`
+/// path to import, so a contact named `' /tmp/evil.vcf '` would make the
+/// launcher import a file nobody asked for.
+///
+/// POSIX single-quoting: everything inside `'…'` is literal, and the only
+/// character that needs handling is the quote itself, closed and reopened
+/// around an escaped one. Checked against `shlex`, which is what actually
+/// parses this, rather than by reading it.
+fn search_exec(label: &str) -> String {
+    let quoted = label.replace('\'', "'\\''");
+    format!("circle '--search={quoted}'")
+}
+
 /// One search result, in the shape pop-launcher deserialises.
 ///
 /// Built here rather than inline so it can be checked against
@@ -370,6 +387,76 @@ mod tests {
             params: Vec::new(),
         });
         contact
+    }
+
+    /// The exec line, read by the parser that actually reads it.
+    ///
+    /// The property that matters is not what the string looks like. It is
+    /// that a parser sees **two** arguments — the binary and one
+    /// `--search=` — whatever the contact is called. A third argument is
+    /// argument injection, and Circle treats a bare argument as a `.vcf` path
+    /// to import, so it is a file-read primitive rather than a mangled query.
+    fn split(label: &str) -> Vec<String> {
+        let exec = search_exec(label);
+        shlex::split(&exec).unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"))
+    }
+
+    #[test]
+    fn an_ordinary_name_becomes_one_search_argument() {
+        assert_eq!(split("Ada Lovelace"), ["circle", "--search=Ada Lovelace"]);
+    }
+
+    /// The apostrophe is the character the quoting exists for, and it is in
+    /// perfectly ordinary names.
+    #[test]
+    fn an_apostrophe_in_a_name_does_not_end_the_quoting() {
+        assert_eq!(
+            split("Grace O'Malley"),
+            ["circle", "--search=Grace O'Malley"]
+        );
+    }
+
+    /// The one that would be a vulnerability: a name that tries to become a
+    /// second argument. Circle would read it as a `.vcf` path and import it.
+    #[test]
+    fn a_name_cannot_become_a_second_argument() {
+        for hostile in [
+            "' /tmp/evil.vcf '",
+            "'; rm -rf /",
+            "' --new-contact '",
+            "\" --search=other \"",
+            "a' 'b",
+        ] {
+            let parsed = split(hostile);
+            assert_eq!(
+                parsed.len(),
+                2,
+                "{hostile:?} became {} arguments: {parsed:?}",
+                parsed.len()
+            );
+            assert_eq!(
+                parsed[1],
+                format!("--search={hostile}"),
+                "{hostile:?} did not survive as one search term"
+            );
+        }
+    }
+
+    /// A control character cannot end the line and start a new command.
+    #[test]
+    fn a_newline_in_a_name_stays_inside_the_argument() {
+        let parsed = split("Ada\nrm -rf /");
+        assert_eq!(parsed.len(), 2, "{parsed:?}");
+        assert_eq!(parsed[1], "--search=Ada\nrm -rf /");
+    }
+
+    /// Names are not ASCII, and quoting that counted bytes rather than
+    /// characters would cut one in half.
+    #[test]
+    fn a_greek_name_survives_the_quoting() {
+        let name =
+            "\u{393}\u{3b9}\u{3ce}\u{3c1}\u{3b3}\u{3bf}\u{3c2} \u{3a0}\u{3b1}\u{3c0}\u{3b1}\u{3c2}";
+        assert_eq!(split(name), ["circle", &format!("--search={name}")]);
     }
 
     #[test]

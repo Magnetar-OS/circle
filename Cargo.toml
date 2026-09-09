@@ -100,6 +100,10 @@ pop-launcher = "1.2.7"
 # that actually renders it rather than by inspecting the text it was built
 # from. Already in the graph through libcosmic.
 usvg = "0.45"
+# The launcher's exec line is parsed by shlex before it is spawned, so the
+# quoting is checked with shlex rather than by reading it. A contact's name
+# reaches that line from whatever a CardDAV server chose to store.
+shlex = "1.3"
 
 [[bin]]
 name = "circle"
