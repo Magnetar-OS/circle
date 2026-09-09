@@ -892,19 +892,9 @@ FN:Ada Lovelace\r\n\
 BDAY:--0415\r\n\
 END:VCARD\r\n";
 
-/// **Known gap, not yet fixed — in the substrate.** `patch_vcard` writes
-/// `BDAY` from `contact.birthday.iter()`, which yields nothing for a year-less
-/// date, so `set` receives an empty line list and that means *remove the
-/// property*. `birthday_month_day` is never consulted, and the line is gone.
-///
-/// A new shape rather than a new rung: one property maps to two model fields,
-/// and the writer knows only one of them. Reported with this reproduction;
-/// kept ignored so `cargo test` names it on every run, and written as the
-/// acceptance test.
-///
-/// Circle's own half — showing a year-less birthday rather than leaving it
-/// invisible — is fixed, and covered in `ui::person`.
-#[ignore = "known gap in the substrate: patch_vcard writes BDAY from `birthday` only, so a year-less one is removed"]
+/// Closed by consulting `birthday_month_day` before concluding the property
+/// is absent — "empty means delete" was correct code applied to an incomplete
+/// question, since BDAY's identity in the model is split across two fields.
 #[test]
 fn a_birthday_with_no_year_survives_an_edit() {
     use cosmic_pim_core::store::contacts::write_contact_raw;

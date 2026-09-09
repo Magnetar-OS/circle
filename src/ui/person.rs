@@ -60,7 +60,15 @@ pub struct Composed<'a> {
     /// The card edits and deletes default to.
     pub head: &'a Contact,
     pub label: String,
+    /// The company, as the card states it — *not* a display string. A
+    /// heading that folds in the job title and the department levels is a
+    /// view concern; writing one of those into an `ORG:` line files the
+    /// contact under a company literally named "Mathematician, Acme ‣ R&D",
+    /// which is what happened before these were kept apart.
     pub organisation: Option<String>,
+    /// `ORG`'s further components — department, team.
+    pub organisation_units: Vec<String>,
+    pub title: Option<String>,
     pub nicknames: Vec<String>,
     pub fields: Vec<Field<'a>>,
     pub categories: Vec<String>,
@@ -70,6 +78,24 @@ pub struct Composed<'a> {
 }
 
 impl Composed<'_> {
+    /// The one line under the name: job title, company, and the department
+    /// levels beneath it.
+    ///
+    /// A view concern, built here so both panes agree and so nothing is
+    /// tempted to write it into a data field.
+    #[must_use]
+    pub fn heading(&self) -> Option<String> {
+        let mut full = self.organisation.clone()?;
+        for unit in &self.organisation_units {
+            full.push_str(" \u{2023} ");
+            full.push_str(unit);
+        }
+        Some(match &self.title {
+            Some(title) => format!("{title}, {full}"),
+            None => full,
+        })
+    }
+
     /// Whether this person is more than one card.
     #[must_use]
     pub fn is_linked(&self) -> bool {
@@ -195,26 +221,27 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
         });
     }
 
-    let organisation = cards.iter().find_map(|(contact, _)| {
-        let org = contact.organisation.as_ref()?;
-        // ORG is a hierarchy — company;department;team. The substrate keeps
-        // the levels beside the company name, and showing them is what stops
-        // preserved-but-invisible from being its own small dishonesty: a
-        // contact filed under a department would otherwise read as though
-        // only the company were on the card.
-        let mut full = org.clone();
-        for unit in contact
+    // The first card that states a company brings its whole ORG with it —
+    // taking the company from one card and its departments from another would
+    // describe a workplace that does not exist.
+    let employer = cards
+        .iter()
+        .find(|(contact, _)| contact.organisation.is_some());
+    let organisation = employer.and_then(|(contact, _)| contact.organisation.clone());
+    let organisation_units = employer.map_or_else(Vec::new, |(contact, _)| {
+        contact
             .organisation_units
             .iter()
             .filter(|unit| !unit.trim().is_empty())
-        {
-            full.push_str(" \u{2023} ");
-            full.push_str(unit);
-        }
-        Some(match &contact.title {
-            Some(title) if !title.trim().is_empty() => format!("{title}, {full}"),
-            _ => full,
-        })
+            .cloned()
+            .collect()
+    });
+    let title = cards.iter().find_map(|(contact, _)| {
+        contact
+            .title
+            .as_ref()
+            .filter(|title| !title.trim().is_empty())
+            .cloned()
     });
 
     let mut nicknames: Vec<String> = Vec::new();
@@ -236,6 +263,8 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
         head,
         label: head.label(),
         organisation,
+        organisation_units,
+        title,
         nicknames,
         fields,
         categories,
@@ -338,13 +367,24 @@ mod tests {
         card.organisation_units = vec!["Research".into(), "Difference Engines".into()];
 
         let cards = [(&card, "Work")];
-        let shown = compose(&cards)
-            .unwrap()
-            .organisation
-            .expect("an organisation");
+        let composed = compose(&cards).unwrap();
+
+        // The heading is the display string; the fields beside it are the
+        // data. Keeping them apart is what stops a heading being written into
+        // an ORG line, which is what the QR share was doing.
+        let shown = composed.heading().expect("a heading");
         assert!(shown.contains("Analytical Engine Co"), "{shown}");
         assert!(shown.contains("Research"), "{shown}");
         assert!(shown.contains("Difference Engines"), "{shown}");
+
+        assert_eq!(
+            composed.organisation.as_deref(),
+            Some("Analytical Engine Co")
+        );
+        assert_eq!(
+            composed.organisation_units,
+            ["Research", "Difference Engines"]
+        );
     }
 
     /// A card that states a day and a month but no year still has a birthday

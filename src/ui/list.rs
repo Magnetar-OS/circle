@@ -149,7 +149,7 @@ pub fn detail<'a>(
             .push(widget::text::title3(person.label.clone())),
     );
 
-    if let Some(heading) = &person.organisation {
+    if let Some(heading) = person.heading().as_ref() {
         column = column.push(
             widget::text::body(heading.clone())
                 .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),

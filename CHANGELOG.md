@@ -127,6 +127,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The QR code wrote a display heading into the card's `ORG` field, so a phone
+  scanning a contact with a job title filed them under a company literally
+  named "Mathematician, Acme". `ORG` now carries the company and its
+  department levels as separate components and `TITLE` is its own property,
+  and the payload is tested by parsing it back rather than by checking the
+  text it was built from.
+
 - A birthday with no year — `BDAY:--0415`, legal vCard and common from people
   who would rather not state an age — was not shown at all. It is now, as a
   day and a month, without inventing a year. **A related bug in the substrate

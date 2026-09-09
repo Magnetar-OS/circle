@@ -77,8 +77,19 @@ pub fn vcard(person: &Composed<'_>) -> String {
         ));
     }
 
+    // ORG carries the company and its department levels as separate
+    // components, and TITLE is its own property — never folded into ORG,
+    // which would file the contact under a company that does not exist.
     if let Some(organisation) = &person.organisation {
-        out.push_str(&line("ORG", organisation));
+        let mut value = escape(organisation);
+        for unit in &person.organisation_units {
+            value.push(';');
+            value.push_str(&escape(unit));
+        }
+        out.push_str(&format!("ORG:{value}\r\n"));
+    }
+    if let Some(title) = &person.title {
+        out.push_str(&line("TITLE", title));
     }
 
     out.push_str("END:VCARD\r\n");
@@ -196,6 +207,77 @@ mod tests {
     fn shared(card: &Contact) -> String {
         let cards = [(card, "Personal")];
         vcard(&crate::ui::person::compose(&cards).expect("compose"))
+    }
+
+    /// The payload has to *parse*, not merely look right.
+    ///
+    /// Every other assertion here is `contains` on text this module wrote,
+    /// which cannot tell a scannable card from a plausible-looking one. A QR
+    /// code no parser reads is worse than no QR code, because the whole point
+    /// is that a stranger's phone reads it. So this puts the payload back
+    /// through a real parser and checks the values arrive.
+    #[test]
+    fn the_payload_parses_back_into_the_contact_it_came_from() {
+        let mut card = ada();
+        card.organisation = Some("Analytical Engine Co".into());
+        card.organisation_units = vec!["Research".into(), "Difference Engines".into()];
+        card.title = Some("Mathematician".into());
+        card.urls.push(typed("https://example.org/ada"));
+
+        let cards = [(&card, "Personal")];
+        let payload = vcard(&crate::ui::person::compose(&cards).expect("compose"));
+
+        let back = cosmic_pim_core::vcard::parse_vcards(&payload, "book", "x.vcf")
+            .pop()
+            .expect("the payload parses as a vCard");
+
+        assert_eq!(back.label(), "Ada Lovelace");
+        assert_eq!(back.name.family, "Lovelace");
+        assert_eq!(back.name.given, "Ada");
+        assert_eq!(
+            back.emails.first().map(|e| e.value.as_str()),
+            Some("ada@example.org")
+        );
+        assert_eq!(
+            back.phones.first().map(|p| p.value.as_str()),
+            Some("+30 210 1234567")
+        );
+        assert_eq!(
+            back.urls.first().map(|u| u.value.as_str()),
+            Some("https://example.org/ada")
+        );
+
+        // The regression this test was written for: the composed *heading* —
+        // "Mathematician, Analytical Engine Co ‣ Research" — was being written
+        // into ORG, so a receiving phone filed the contact under a company by
+        // that name. ORG carries components; TITLE is its own property.
+        assert_eq!(
+            back.organisation.as_deref(),
+            Some("Analytical Engine Co"),
+            "a display heading was written into ORG"
+        );
+        assert_eq!(
+            back.organisation_units,
+            vec!["Research", "Difference Engines"]
+        );
+        assert_eq!(back.title.as_deref(), Some("Mathematician"));
+    }
+
+    /// A name with separators in it has to come back as one name, not several
+    /// fields — the escaping has to survive a real parser, not just look
+    /// escaped.
+    #[test]
+    fn an_escaped_name_parses_back_whole() {
+        let mut card = ada();
+        card.display_name = "Lovelace, Ada; Countess".into();
+
+        let cards = [(&card, "Personal")];
+        let payload = vcard(&crate::ui::person::compose(&cards).expect("compose"));
+        let back = cosmic_pim_core::vcard::parse_vcards(&payload, "book", "x.vcf")
+            .pop()
+            .expect("parses");
+
+        assert_eq!(back.label(), "Lovelace, Ada; Countess");
     }
 
     #[test]
