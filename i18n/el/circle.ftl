@@ -93,7 +93,7 @@ address-postcode = Ταχυδρομικός κώδικας
 address-country = Χώρα
 
 birthday-format = Γενέθλια, ως ΕΕΕΕ-ΜΜ-ΗΗ
-categories-hint = Χωρίστε τις κατηγορίες με κόμματα.
+categories-hint = Χωρίστε τις κατηγορίες με κόμματα. Ένα κόμμα μέσα σε μια κατηγορία γράφεται \\,
 
 add-email = Προσθήκη διεύθυνσης email
 add-phone = Προσθήκη τηλεφώνου

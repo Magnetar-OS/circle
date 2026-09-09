@@ -174,9 +174,23 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
 
     let organisation = cards.iter().find_map(|(contact, _)| {
         let org = contact.organisation.as_ref()?;
+        // ORG is a hierarchy — company;department;team. The substrate keeps
+        // the levels beside the company name, and showing them is what stops
+        // preserved-but-invisible from being its own small dishonesty: a
+        // contact filed under a department would otherwise read as though
+        // only the company were on the card.
+        let mut full = org.clone();
+        for unit in contact
+            .organisation_units
+            .iter()
+            .filter(|unit| !unit.trim().is_empty())
+        {
+            full.push_str(" \u{2023} ");
+            full.push_str(unit);
+        }
         Some(match &contact.title {
-            Some(title) if !title.trim().is_empty() => format!("{title}, {org}"),
-            _ => org.clone(),
+            Some(title) if !title.trim().is_empty() => format!("{title}, {full}"),
+            _ => full,
         })
     });
 
@@ -290,6 +304,24 @@ mod tests {
 
         let cards = [(&work, "Work"), (&home, "Personal")];
         assert_eq!(compose(&cards).unwrap().fields.len(), 1);
+    }
+
+    /// A department is data the card carries; preserving it and not showing
+    /// it reads as though the card said less than it does.
+    #[test]
+    fn the_organisations_department_levels_are_shown() {
+        let mut card = contact("work", "a", "Ada");
+        card.organisation = Some("Analytical Engine Co".into());
+        card.organisation_units = vec!["Research".into(), "Difference Engines".into()];
+
+        let cards = [(&card, "Work")];
+        let shown = compose(&cards)
+            .unwrap()
+            .organisation
+            .expect("an organisation");
+        assert!(shown.contains("Analytical Engine Co"), "{shown}");
+        assert!(shown.contains("Research"), "{shown}");
+        assert!(shown.contains("Difference Engines"), "{shown}");
     }
 
     #[test]

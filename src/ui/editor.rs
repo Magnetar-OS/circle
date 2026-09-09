@@ -168,7 +168,7 @@ impl State {
             .birthday
             .map(|b| b.format("%Y-%m-%d").to_string())
             .unwrap_or_default();
-        let categories_text = contact.categories.join(", ");
+        let categories_text = join_categories(&contact.categories);
         let (ids, names) = writable(books);
         Self {
             contact,
@@ -239,13 +239,7 @@ impl State {
             chrono::NaiveDate::parse_from_str(self.birthday_text.trim(), "%Y-%m-%d").ok()
         };
 
-        contact.categories = self
-            .categories_text
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(ToOwned::to_owned)
-            .collect();
+        contact.categories = split_categories(&self.categories_text);
 
         // Blank rows are what an "Add" button that was clicked once too often
         // leaves behind; writing them out would put empty EMAIL lines on the
@@ -834,6 +828,57 @@ pub fn unmodelled_properties(raw: &str) -> Vec<String> {
     seen
 }
 
+/// Categories as one comma-separated line, with commas *inside* a category
+/// escaped the way vCard escapes them.
+///
+/// A plain join is not reversible. `CATEGORIES:work,friends\, close,vip` is
+/// three categories, one of which contains a comma; joining and re-splitting
+/// on every comma turns it into four and destroys the escape on the next
+/// save. Escaping on the way out and honouring it on the way back makes the
+/// round trip faithful, and the spelling is the format's own, so a user who
+/// has seen a vCard will recognise it.
+fn join_categories(categories: &[String]) -> String {
+    categories
+        .iter()
+        .map(|category| category.replace('\\', "\\\\").replace(',', "\\,"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The inverse of [`join_categories`]: split on commas that are not escaped.
+fn split_categories(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                // An escaped comma or backslash is part of the value.
+                Some(escaped @ (',' | '\\')) => current.push(escaped),
+                Some(other) => {
+                    current.push('\\');
+                    current.push(other);
+                }
+                None => current.push('\\'),
+            },
+            ',' => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_owned());
+                }
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        out.push(trimmed.to_owned());
+    }
+    out
+}
+
 /// A property name exactly as the card spells it, with any group prefix removed
 /// (`item1.X-ABLabel` → `X-ABLabel`).
 fn source_name(unfolded: &str) -> String {
@@ -909,6 +954,38 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
 
     /// Dropping a grouped entry from the list would not remove it from the
     /// card, so the control does not exist and the handler refuses too.
+    #[test]
+    fn categories_round_trip_through_the_text_field() {
+        for original in [
+            vec![
+                "work".to_owned(),
+                "friends, close".to_owned(),
+                "vip".to_owned(),
+            ],
+            vec!["a\\b".to_owned()],
+            vec!["plain".to_owned()],
+            vec![],
+        ] {
+            let joined = join_categories(&original);
+            assert_eq!(
+                split_categories(&joined),
+                original,
+                "round trip failed through {joined:?}"
+            );
+        }
+    }
+
+    /// What somebody types is comma-separated and unescaped; the parse has to
+    /// stay forgiving of the ordinary case.
+    #[test]
+    fn typed_categories_split_on_commas_and_trim() {
+        assert_eq!(
+            split_categories(" work , friends ,, vip "),
+            vec!["work", "friends", "vip"]
+        );
+        assert!(split_categories("   ").is_empty());
+    }
+
     #[test]
     fn a_grouped_entry_cannot_be_removed() {
         let mut state = state();

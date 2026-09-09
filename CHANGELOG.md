@@ -127,6 +127,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Editing any field stripped parameters from a contact's other lines —
+  `X-SERVICE`, `PID`, `ALTID`, `LANGUAGE`, and a quoted `GEO=` on an address
+  all vanished from a card whose *name* was edited, and the loss pushed to the
+  server on the next sync. Fixed in the substrate; Circle now also pins that
+  its editor mutates the entries it was given rather than rebuilding them,
+  which is the half of that fix an application has to keep on its own.
+- An organisation's department levels were dropped: `ORG:Company;Research;Team`
+  became `ORG:Company`. They are preserved now, and shown.
+- A category containing a comma was split in two by the editor, which joined
+  categories with commas for display and split on every comma when saving.
+  Commas inside a category are now written `\,`, the way vCard writes them.
+
 - **A contact could be given another person's identity.** A `.vcf` holding
   several cards — which is what every export from Google, Apple and Outlook is
   — was read as several contacts that all carried the whole file as their

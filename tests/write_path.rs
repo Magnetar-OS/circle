@@ -805,21 +805,73 @@ fn n_and_adr_keep_every_component_through_an_edit() {
     );
 }
 
-/// **Known gap, not yet fixed.** `ORG` is a hierarchy —
-/// `company;department;team` — and `Contact::organisation` is one `String`,
-/// so everything after the first component is dropped by an edit that never
-/// touched the organisation at all.
-///
-/// The same shape as the parameter gap one level down: the model is narrower
-/// than the format, and the narrow part is regenerated rather than preserved.
-/// Reported to the substrate with this reproduction; kept ignored so
-/// `cargo test` names it on every run, and it becomes the acceptance test.
-#[ignore = "known gap: Contact::organisation is one string, so ORG's department levels are dropped"]
+/// Closed by `Contact::organisation_units`, which carries the department
+/// levels beside the company name rather than flattening them into it — kept
+/// separate because the components are escaped individually, and a join would
+/// write one name that happens to contain semicolons, which is a different
+/// fact about the contact.
 #[test]
 fn org_keeps_its_department_levels_through_an_edit() {
     let patched = patched_unfolded(STRUCTURED, |c| c.display_name = "Ada Byron".into());
     assert!(
         patched.contains("ORG:Analytical Engine Co;Research;Difference Engines"),
         "the organisation's department levels were lost: {patched}"
+    );
+}
+
+/// A category containing a comma, through the editor.
+///
+/// The substrate now unescapes `CATEGORIES:work,friends\, close,vip` into
+/// three values, one of which contains a comma. The editor shows categories
+/// as comma-separated text and splits that text on save — so a value with a
+/// comma in it becomes two, and the escape is destroyed on the next write.
+///
+/// This is the obligation the substrate documents but cannot enforce, in its
+/// second form: not rebuilding an *entry* from field state, but rebuilding a
+/// *list* from a flattened rendering of it. Preservation below the model is
+/// only real if the interface preserves it too.
+const CATEGORISED: &str = "BEGIN:VCARD\r\n\
+VERSION:4.0\r\n\
+UID:ada@cats\r\n\
+FN:Ada Lovelace\r\n\
+CATEGORIES:work,friends\\, close,vip\r\n\
+END:VCARD\r\n";
+
+#[test]
+fn a_category_containing_a_comma_survives_the_editor() {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+
+    let mut fixture = fixture();
+    write_contact_raw(&fixture.book, "cats.vcf", CATEGORISED).expect("seed");
+    fixture.store.refresh();
+
+    let contact = fixture
+        .store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@cats")
+        .expect("the seeded contact");
+    assert_eq!(
+        contact.categories,
+        vec!["work", "friends, close", "vip"],
+        "the substrate stopped unescaping, so this tests the wrong thing"
+    );
+
+    // Edit something else entirely and save through the real editor.
+    let mut editor = State::edit(contact, fixture.store.books());
+    editor.update(Message::Text(Field::DisplayName, "Ada Byron".into()));
+    fixture.store.save(&editor.finish()).expect("save");
+
+    let back = fixture
+        .store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@cats")
+        .expect("still there");
+
+    assert_eq!(
+        back.categories,
+        vec!["work", "friends, close", "vip"],
+        "the editor split a category on the comma inside it"
     );
 }

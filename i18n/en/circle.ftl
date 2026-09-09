@@ -91,7 +91,7 @@ address-postcode = Postcode
 address-country = Country
 
 birthday-format = Birthday, as YYYY-MM-DD
-categories-hint = Separate categories with commas.
+categories-hint = Separate categories with commas. A comma inside one category is written \\,
 
 add-email = Add an email address
 add-phone = Add a phone number
