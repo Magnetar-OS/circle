@@ -750,3 +750,76 @@ fn parameters_survive_a_round_trip_through_the_editor() {
         "a freshly added entry inherited another line's parameters: {added_line}"
     );
 }
+
+/// One level below a line: a structured **value**.
+///
+/// A line holds more than its value; a value holds more than one component.
+/// `N` has five and `ADR` has seven, and the model names all of them. `ORG`
+/// is a hierarchy — `company;department;team` — and `Contact::organisation`
+/// is one `String`, so this asks whether the parts the model does not name
+/// come back.
+const STRUCTURED: &str = "BEGIN:VCARD\r\n\
+VERSION:4.0\r\n\
+UID:ada@structured\r\n\
+FN:Ada Lovelace\r\n\
+N:Lovelace;Ada;Augusta;Ms.;FRS\r\n\
+ORG:Analytical Engine Co;Research;Difference Engines\r\n\
+ADR;TYPE=work:PO Box 12;Suite 4;12 Marylebone Rd;London;Greater London;NW1 5LA;UK\r\n\
+END:VCARD\r\n";
+
+/// A card patched, then unfolded so assertions see logical lines.
+///
+/// Folding at 75 octets is correct and is not what these tests are about; a
+/// naive `contains` on the folded text fails on a postcode split across a
+/// continuation, which says nothing about preservation.
+fn patched_unfolded(card: &str, edit: impl FnOnce(&mut cosmic_pim_core::model::Contact)) -> String {
+    use cosmic_pim_core::vcard::{parse_vcards, patch_vcard};
+
+    let mut contact = parse_vcards(card, "book", "ada.vcf").remove(0);
+    edit(&mut contact);
+    patch_vcard(&contact.raw, &contact)
+        .expect("the card patches")
+        .replace("\r\n ", "")
+}
+
+#[test]
+fn n_and_adr_keep_every_component_through_an_edit() {
+    let patched = patched_unfolded(STRUCTURED, |c| c.display_name = "Ada Byron".into());
+    assert!(
+        patched.contains("Ada Byron"),
+        "the edit did not land: {patched}"
+    );
+
+    // N has five components and ADR has seven; the model names all of them,
+    // so both survive a patch whole.
+    assert!(
+        patched.contains("N:Lovelace;Ada;Augusta;Ms.;FRS"),
+        "a component of N was lost: {patched}"
+    );
+    assert!(
+        patched.contains(
+            "ADR;TYPE=work:PO Box 12;Suite 4;12 Marylebone Rd;London;\
+                          Greater London;NW1 5LA;UK"
+        ),
+        "a component of ADR was lost: {patched}"
+    );
+}
+
+/// **Known gap, not yet fixed.** `ORG` is a hierarchy —
+/// `company;department;team` — and `Contact::organisation` is one `String`,
+/// so everything after the first component is dropped by an edit that never
+/// touched the organisation at all.
+///
+/// The same shape as the parameter gap one level down: the model is narrower
+/// than the format, and the narrow part is regenerated rather than preserved.
+/// Reported to the substrate with this reproduction; kept ignored so
+/// `cargo test` names it on every run, and it becomes the acceptance test.
+#[ignore = "known gap: Contact::organisation is one string, so ORG's department levels are dropped"]
+#[test]
+fn org_keeps_its_department_levels_through_an_edit() {
+    let patched = patched_unfolded(STRUCTURED, |c| c.display_name = "Ada Byron".into());
+    assert!(
+        patched.contains("ORG:Analytical Engine Co;Research;Difference Engines"),
+        "the organisation's department levels were lost: {patched}"
+    );
+}
