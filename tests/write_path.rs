@@ -350,7 +350,7 @@ fn setting_and_removing_a_photo_preserves_the_rest_of_the_card() {
 
     // Set: replaces the seed card's PHOTO, keeps its grouped label and GEO.
     let saved = fixture.ada();
-    let patched = set_photo(&saved.raw, &png, "image/png").expect("patch");
+    let patched = set_photo(&saved.raw, &saved.uid, &png, "image/png").expect("patch");
     write_contact_raw(&fixture.book, &saved.file_name, &patched).expect("write");
 
     let back = fixture.ada();
@@ -367,7 +367,7 @@ fn setting_and_removing_a_photo_preserves_the_rest_of_the_card() {
     assert!(back.raw.contains("GEO:"), "{}", back.raw);
 
     // Remove: the photo goes, nothing else does.
-    let stripped = remove_photo(&back.raw).expect("patch");
+    let stripped = remove_photo(&back.raw, &back.uid).expect("patch");
     write_contact_raw(&fixture.book, &back.file_name, &stripped).expect("write");
     let back = fixture.ada();
     assert!(!back.has_photo);
@@ -504,7 +504,7 @@ Grace,Hopper,grace@example.com,grace@import\n\
         .contact(&fixture.book.id, "grace@import")
         .unwrap();
     let with_photo =
-        cosmic_pim_core::vcard::set_photo(&grace.raw, &[1, 2, 3], "image/png").unwrap();
+        cosmic_pim_core::vcard::set_photo(&grace.raw, &grace.uid, &[1, 2, 3], "image/png").unwrap();
     cosmic_pim_core::store::contacts::write_contact_raw(
         &fixture.book,
         &grace.file_name,

@@ -2307,7 +2307,11 @@ impl AppModel {
                 book: key.book.clone(),
                 uid: key.uid.clone(),
                 file_name: contact.file_name,
-                raw: contact.raw,
+                // This card's own text, not the file's. `Contact::raw` is the
+                // whole document, and a `.vcf` may hold several people — an
+                // undo that wrote the document back would restore this card
+                // and silently revert any edit made to the others since.
+                raw: card_segment(&contact.raw, &key.uid),
                 crm,
             });
         }
@@ -2361,10 +2365,16 @@ impl AppModel {
                 first_error.get_or_insert_with(|| fl!("error-load-contacts"));
                 continue;
             };
+            // Merged into the file's current contents rather than written
+            // over them, for the same reason the segment was stored: the
+            // people who shared this file with the deleted card are still in
+            // it, and may have been edited since.
+            let current = std::fs::read_to_string(meta.path.join(&card.file_name)).ok();
+            let restored = restore_into(current.as_deref(), &card.raw, &card.uid);
             match cosmic_pim_core::store::contacts::write_contact_raw(
                 &meta,
                 &card.file_name,
-                &card.raw,
+                &restored,
             ) {
                 Ok(()) => {
                     queue_push(store, &card.book, &card.file_name);
@@ -3028,13 +3038,14 @@ fn apply_photo_edit(
             let saved = store
                 .contact(&contact.addressbook_id, &contact.uid)
                 .ok_or_else(|| fl!("error-load-contacts"))?;
-            set_photo(&saved.raw, &data, mime).ok_or_else(|| fl!("error-load-contacts"))?
+            set_photo(&saved.raw, &contact.uid, &data, mime)
+                .ok_or_else(|| fl!("error-load-contacts"))?
         }
         editor::PhotoEdit::Remove => {
             let saved = store
                 .contact(&contact.addressbook_id, &contact.uid)
                 .ok_or_else(|| fl!("error-load-contacts"))?;
-            match remove_photo(&saved.raw) {
+            match remove_photo(&saved.raw, &contact.uid) {
                 Some(patched) => patched,
                 // No card text to patch means no photo to remove.
                 None => return Ok(()),
@@ -3216,6 +3227,52 @@ fn photo_mime(path: &std::path::Path) -> &'static str {
     }
 }
 
+/// One card's own text, sliced out of a document that may hold several.
+///
+/// [`Contact::raw`] is the whole file, because that is what the parser hands
+/// back. Everything that stores a card for later — the undo entry — wants
+/// only the card.
+fn card_segment(raw: &str, uid: &str) -> String {
+    use cosmic_pim_core::vcard::{split_vcards, vcard_index_of};
+
+    match vcard_index_of(raw, uid).and_then(|index| split_vcards(raw).into_iter().nth(index)) {
+        Some(segment) => segment,
+        // A document with no cards, or one this uid does not name. Keeping the
+        // original is the safe answer: an undo that restores too much is
+        // recoverable, one that restores nothing is not.
+        None => raw.to_owned(),
+    }
+}
+
+/// A deleted card put back into whatever its file now holds.
+///
+/// Appended rather than re-inserted at its old position: the position is not
+/// recorded and the order of cards in a `.vcf` carries no meaning, whereas
+/// the edits made to the other cards since the delete very much do.
+fn restore_into(current: Option<&str>, segment: &str, uid: &str) -> String {
+    let Some(current) = current.map(str::trim_end).filter(|text| !text.is_empty()) else {
+        return segment.to_owned();
+    };
+    // Already back — a sync pulled it, or the undo ran twice. Adding it again
+    // would make two of them.
+    //
+    // Checked by looking for the UID itself, not with `vcard_index_of`: that
+    // answers `Some(0)` for a lone card whatever its UID says, which is right
+    // for locating the card to patch and wrong for asking whether a
+    // particular one is present.
+    if names_card(current, uid) {
+        return current.to_owned();
+    }
+    format!("{current}\r\n{segment}")
+}
+
+/// Whether `text` holds a card carrying exactly this UID.
+fn names_card(text: &str, uid: &str) -> bool {
+    cosmic_pim_core::patch::logical_lines(text)
+        .iter()
+        .any(|line| line.name() == "UID" && line.value().trim() == uid)
+}
+
 /// A path's file name, for messages — the full path is noise in a toast.
 fn file_label(path: &std::path::Path) -> String {
     path.file_name().map_or_else(
@@ -3270,6 +3327,63 @@ mod tests {
         let mut c = Contact::draft(book);
         c.uid = uid.to_owned();
         c
+    }
+
+    const TWO: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n\
+BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
+
+    /// `Contact::raw` is the whole file; an undo entry wants one card.
+    #[test]
+    fn a_segment_is_one_card_out_of_a_file_of_several() {
+        let segment = card_segment(TWO, "bob");
+        assert!(segment.contains("UID:bob"), "{segment}");
+        assert!(
+            !segment.contains("UID:ada"),
+            "the segment took the other card too: {segment}"
+        );
+        assert_eq!(segment.matches("BEGIN:VCARD").count(), 1);
+    }
+
+    #[test]
+    fn a_lone_card_is_its_own_segment() {
+        let one = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n";
+        assert_eq!(card_segment(one, "ada"), one);
+    }
+
+    /// The bug this pair exists to prevent: restoring Bob must not revert the
+    /// edit made to Ada while the undo toast was up.
+    #[test]
+    fn restoring_a_card_keeps_the_edits_made_to_the_others() {
+        let segment = card_segment(TWO, "bob");
+        let after_delete_and_edit =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n";
+
+        let restored = restore_into(Some(after_delete_and_edit), &segment, "bob");
+        assert!(
+            restored.contains("FN:Ada Lovelace"),
+            "the undo reverted the other card's edit: {restored}"
+        );
+        assert!(
+            restored.contains("UID:bob"),
+            "the deleted card did not come back"
+        );
+        assert_eq!(restored.matches("BEGIN:VCARD").count(), 2);
+    }
+
+    #[test]
+    fn restoring_into_a_file_that_is_gone_writes_the_card_alone() {
+        let segment = card_segment(TWO, "bob");
+        assert_eq!(restore_into(None, &segment, "bob"), segment);
+        assert_eq!(restore_into(Some("   "), &segment, "bob"), segment);
+    }
+
+    /// A sync may have pulled the card back before the undo ran; adding it
+    /// again would make two of them.
+    #[test]
+    fn restoring_a_card_that_is_already_back_does_not_duplicate_it() {
+        let segment = card_segment(TWO, "bob");
+        let restored = restore_into(Some(TWO), &segment, "bob");
+        assert_eq!(restored.matches("UID:bob").count(), 1, "{restored}");
     }
 
     /// The same UID in two books is two people as far as the list is concerned;

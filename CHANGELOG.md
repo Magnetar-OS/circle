@@ -127,6 +127,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A contact could be given another person's identity.** A `.vcf` holding
+  several cards — which is what every export from Google, Apple and Outlook is
+  — was read as several contacts that all carried the whole file as their
+  source. Editing one of them then wrote that person's name, email and address
+  over the *first* card in the file while leaving the first card's UID in
+  place, and the edit never reached the person who made it. Fixed in the
+  substrate; Circle now has a multi-card fixture and asserts, for every write
+  it can perform, that the card it did not edit is byte-for-byte unchanged.
+- Deleting one contact out of a shared file deleted everybody else in it.
+- Setting a photo, or a group's membership, on one contact in a shared file
+  wrote it onto a different contact's card.
+- Undoing a delete overwrote the whole file, silently reverting any edit made
+  to the other people in it while the undo toast was up. The undo entry now
+  carries only the deleted card, and puts it back into whatever the file holds
+  by then.
+
 - Circle was shipping Slate's calendar icon — byte for byte the same file, so
   a contacts application showed a calendar in the applications menu, on the
   panel, in its own About page, and in the software centre. Replaced with a
