@@ -625,18 +625,8 @@ EMAIL;TYPE=work;X-SERVICE=slack:ada@work.example\r\n\
 TEL;TYPE=cell;X-CARRIER=cosmote:+30 694 1234567\r\n\
 END:VCARD\r\n";
 
-/// **Known gap, not yet fixed.** Kept as executable documentation: it names
-/// the defect precisely and becomes the acceptance test the day it is closed.
-/// `cargo test` reports it as ignored on every run, so it does not go quiet.
-///
-/// The fix is a model change in the substrate — `Typed` carries `value`,
-/// `types`, `pref` and `group`, and the patcher regenerates each modelled
-/// line from exactly those, so a parameter with nowhere to live is dropped.
-/// The shape to copy already exists there: events keep what the model does
-/// not name in a verbatim `other`. Doing that for `Typed` touches the parser,
-/// the writer and eighteen construction sites across two repositories, which
-/// is a deliberate change rather than a patch.
-#[ignore = "known gap: the patcher regenerates modelled lines and drops their unmodelled parameters"]
+/// Closed by `Typed::params`, which carries a line's other parameters *in the
+/// entry* rather than reconstructing them at write time.
 #[test]
 fn parameters_on_untouched_lines_survive_an_edit() {
     use cosmic_pim_core::vcard::{parse_vcards, patch_vcard};
@@ -663,12 +653,11 @@ fn parameters_on_untouched_lines_survive_an_edit() {
 
 /// The harder half: the parameter sits on a line whose **value** is being
 /// rewritten, so it cannot be preserved by leaving the line alone.
-/// The harder half of the same gap: preserving a parameter here cannot be
-/// done by leaving the line alone, so a fix needs a join between the old
-/// lines and the new values. Value equality works when the value is
-/// unchanged; this case is what makes position or an explicit identity
-/// necessary.
-#[ignore = "known gap: see parameters_on_untouched_lines_survive_an_edit"]
+/// The half that made the design: a parameter here cannot be preserved by
+/// leaving the line alone. Carrying it in the entry dissolves the problem —
+/// the `Typed` the interface edited is the one that holds them, so there is
+/// no write-time join between old lines and new values, and therefore no
+/// positional matching to get wrong.
 #[test]
 fn parameters_survive_a_rewrite_of_the_value_they_sit_on() {
     use cosmic_pim_core::vcard::{parse_vcards, patch_vcard};
@@ -685,5 +674,79 @@ fn parameters_survive_a_rewrite_of_the_value_they_sit_on() {
     assert!(
         patched.contains("X-SERVICE=slack"),
         "changing an address dropped the service parameter beside it: {patched}"
+    );
+}
+
+/// The join the substrate's own tests cannot make: parameters have to survive
+/// a round trip through *this* application's editor, not only through the
+/// patcher.
+///
+/// Carrying them in `Typed` is only half the fix. An interface that rebuilt
+/// its entries from its own field state — which is a perfectly ordinary way
+/// to write an editor — would hand the patcher entries with empty `params`
+/// and drop them just as thoroughly, while every test in the substrate
+/// carried on passing. Circle mutates the entries it was given in place, and
+/// this is the test that says so.
+#[test]
+fn parameters_survive_a_round_trip_through_the_editor() {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+
+    let mut fixture = fixture();
+    write_contact_raw(&fixture.book, "params.vcf", PARAMETERISED).expect("seed");
+    fixture.store.refresh();
+
+    let contact = fixture
+        .store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@params")
+        .expect("the seeded contact");
+
+    // Edit through the real editor: rename, retype an existing entry, and add
+    // a new one — the three things that touch a `Typed` in different ways.
+    let mut editor = State::edit(contact, fixture.store.books());
+    editor.update(Message::Text(Field::DisplayName, "Ada Byron".into()));
+    editor.update(Message::ListValue(
+        ListKind::Email,
+        0,
+        "ada@newwork.example".into(),
+    ));
+    editor.update(Message::ListAdd(ListKind::Phone));
+    let added = editor.contact.phones.len() - 1;
+    editor.update(Message::ListValue(
+        ListKind::Phone,
+        added,
+        "+30 210 5555555".into(),
+    ));
+
+    fixture.store.save(&editor.finish()).expect("save");
+
+    let card = std::fs::read_to_string(fixture.book.path.join("params.vcf")).expect("read it back");
+
+    assert!(
+        card.contains("Ada Byron"),
+        "the rename did not land: {card}"
+    );
+    assert!(
+        card.contains("ada@newwork.example"),
+        "the address edit did not land: {card}"
+    );
+    assert!(
+        card.contains("X-SERVICE=slack"),
+        "the editor dropped the parameter on the line it edited: {card}"
+    );
+    assert!(
+        card.contains("X-CARRIER=cosmote"),
+        "the editor dropped the parameter on a line it did not touch: {card}"
+    );
+    // The added entry came from no line, so it carries nothing — and must not
+    // have inherited another entry's parameters.
+    let added_line = card
+        .lines()
+        .find(|line| line.contains("+30 210 5555555"))
+        .expect("the added number is on the card");
+    assert!(
+        !added_line.contains("X-CARRIER"),
+        "a freshly added entry inherited another line's parameters: {added_line}"
     );
 }

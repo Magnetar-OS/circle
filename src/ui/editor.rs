@@ -900,6 +900,7 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
             types: vec!["work".into(), "voice".into()],
             pref: None,
             group: None,
+            params: Vec::new(),
         });
 
         state.update(Message::ListLabel(ListKind::Phone, 0, 2)); // "mobile"
@@ -916,6 +917,7 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
             types: vec!["internet".into()],
             pref: None,
             group: Some("item1".into()),
+            params: Vec::new(),
         });
 
         state.update(Message::ListRemove(ListKind::Email, 0));
@@ -1028,6 +1030,7 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
             types: vec!["internet".into()],
             pref: None,
             group: Some("item1".into()),
+            params: Vec::new(),
         });
 
         state.update(Message::ListValue(

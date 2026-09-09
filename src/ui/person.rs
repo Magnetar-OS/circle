@@ -217,6 +217,7 @@ mod tests {
             types: Vec::new(),
             pref: None,
             group: None,
+            params: Vec::new(),
         }
     }
 
