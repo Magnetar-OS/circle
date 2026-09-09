@@ -282,3 +282,155 @@ fn everything_survives_reopening_the_store() {
     assert_eq!(summary.cadence_days, Some(90));
     assert!(summary.last_contacted.is_some());
 }
+
+/// The privacy promise, tested against the store rather than read off the
+/// scanner.
+///
+/// Circle tells the user, in two strings it shows them, that notes and
+/// attachments "are not written to the contact's card" and "never reach a
+/// server". Three module headers say the same thing a fourth way: these live
+/// in a dot-directory the vdir collection scanner skips, so sync cannot see
+/// them. That is four statements of one invariant, and the code implementing
+/// it is `collections()` in another crate — a claim about somebody else's call
+/// sites, which is the kind that survives review by everyone who reads the
+/// comment. The module header above claims it too, and checked one half.
+///
+/// So this writes real notes, a real link and a real attachment for a real
+/// contact, then asks the actual store what it holds: the books it finds, the
+/// contacts it reads, the bytes of the cards, everything inside the collection
+/// directory, and the push queue sync drains. None of it may mention any of
+/// them. The queue is the half that matters and the half nothing tested — a
+/// dot-directory invisible as a *collection* still leaks if anything ever
+/// enqueues a path inside one.
+#[test]
+fn nothing_local_is_visible_to_the_store_or_the_push_queue() {
+    use cosmic_pim_caldav::VdirStore;
+    use cosmic_pim_caldav::push::PushQueue;
+
+    let dir = tempfile::tempdir().expect("scratch directory");
+    let root = dir.path().join("contacts");
+    let mut store = ContactStore::open(&root).expect("open the store");
+    let book = store
+        .create_book("Personal", Rgb(0x84, 0x2b, 0xd2))
+        .expect("create a book");
+    write_contact_raw(&book, "ada.vcf", ADA).expect("seed a card");
+    store.refresh();
+
+    let card = CardRef {
+        book: book.id.clone(),
+        uid: "ada@home".to_owned(),
+    };
+    let now = Utc::now();
+
+    let mut crm = CrmStore::open(&root);
+    crm.add_note(&card, "Leaving Acme in March", now)
+        .expect("write a note");
+    crm.log_interaction(&card, "Rang about Acme", now)
+        .expect("log a contact");
+
+    let mut links = LinkStore::open(&root);
+    links
+        .link(vec![
+            card.clone(),
+            CardRef {
+                book: book.id.clone(),
+                uid: "ada@work".to_owned(),
+            },
+        ])
+        .expect("write a link");
+
+    let source = dir.path().join("payslip.pdf");
+    std::fs::write(&source, b"CONFIDENTIAL").expect("write the source file");
+    let blob = circle::attachments::store(&root, &source).expect("store an attachment");
+    crm.attach(&card, blob).expect("record the attachment");
+
+    // The secrets, one per store, in the words a reader would search for.
+    let secrets = ["Acme", "payslip", "CONFIDENTIAL", "ada@work"];
+
+    // 0. The data really is on disk first. Without this the whole test passes
+    //    if `add_note` quietly wrote nothing — it would be proving absence
+    //    rather than invisibility, and would go on passing forever.
+    let mut found: Vec<&str> = Vec::new();
+    for entry in walk(&root) {
+        let Ok(text) = std::fs::read_to_string(&entry) else {
+            continue;
+        };
+        for secret in secrets {
+            if text.contains(secret) && !found.contains(&secret) {
+                found.push(secret);
+            }
+        }
+    }
+    assert_eq!(
+        found.len(),
+        secrets.len(),
+        "not everything was written, so invisibility proves nothing: found {found:?}"
+    );
+
+    // 1. None of it is a collection. This is the half the headers claim.
+    store.refresh();
+    assert_eq!(
+        store.books().len(),
+        1,
+        "a local dot-directory was read as an address book: {:?}",
+        store.books().iter().map(|b| &b.id).collect::<Vec<_>>()
+    );
+
+    // 2. None of it is a contact, or in a card. `notes-are-local` promises
+    //    the user exactly this sentence.
+    let contacts = store.contacts();
+    assert_eq!(contacts.len(), 1, "a local record was read as a contact");
+    for secret in secrets {
+        assert!(
+            !contacts[0].raw.contains(secret),
+            "{secret:?} reached the card"
+        );
+    }
+
+    // 3. None of it is inside the collection directory — the only tree sync
+    //    walks — whatever the queue happens to hold today.
+    for entry in std::fs::read_dir(&book.path).expect("read the book") {
+        let path = entry.expect("entry").path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for secret in secrets {
+            assert!(
+                !text.contains(secret),
+                "{secret:?} is in {}, inside the synced collection",
+                path.display()
+            );
+        }
+    }
+
+    // 4. And none of it is queued for upload. Everything above can hold and
+    //    this still leak, which is why it is asserted separately.
+    let pending = VdirStore::open(book.clone())
+        .expect("open vdir store")
+        .pending();
+    for entry in &pending {
+        for secret in secrets {
+            assert!(
+                !format!("{entry:?}").contains(secret),
+                "{secret:?} was queued for upload"
+            );
+        }
+    }
+}
+
+/// Every file under a directory, dot-directories included — which is the point.
+fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(walk(&path));
+        } else {
+            out.push(path);
+        }
+    }
+    out
+}
