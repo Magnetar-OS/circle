@@ -22,8 +22,10 @@ use crate::ui::editor;
 
 const APP_ID: &str = "com.magnetaros.Circle";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
-const APP_ICON: &[u8] =
-    include_bytes!("../resources/icons/hicolor/scalable/apps/com.magnetaros.Circle.svg");
+// The file this names must be *committed*, not merely present. Pointing it at
+// an untracked path compiles for whoever has that file and breaks the build
+// for a clean checkout, which is what CI and every other machine is.
+const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
 
 /// Identifies one contact.
 ///
