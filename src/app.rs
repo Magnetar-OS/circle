@@ -22,7 +22,8 @@ use crate::ui::editor;
 
 const APP_ID: &str = "com.magnetaros.Circle";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
-const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
+const APP_ICON: &[u8] =
+    include_bytes!("../resources/icons/hicolor/scalable/apps/com.magnetaros.Circle.svg");
 
 /// Identifies one contact.
 ///
