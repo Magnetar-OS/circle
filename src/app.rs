@@ -3451,4 +3451,29 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         assert_eq!(data, noise);
         assert_eq!(mime, "image/jpeg");
     }
+
+    /// The icon is Circle's own, and says so.
+    ///
+    /// This application has shipped another app's icon before — Slate's
+    /// calendar, byte for byte the same file — so a contacts app showed a
+    /// calendar in the menu, on the panel, in its own About page and in the
+    /// software centre. Nothing caught it. It is the failure mode that passes
+    /// every check worth having: the file was committed, correctly named,
+    /// correctly sized, valid SVG, and installed exactly where it belonged.
+    ///
+    /// The realistic way it happens is a whole file copied from a sibling
+    /// repository, and a copied file brings the comment of the app it came
+    /// from. So each icon source names itself, and this asserts the bytes the
+    /// About page embeds are the ones that carry Circle's name. It cannot
+    /// prove the art is right — only a person looking at it can do that — but
+    /// it does catch the copy.
+    #[test]
+    fn the_embedded_icon_identifies_itself_as_circles() {
+        let svg = std::str::from_utf8(APP_ICON).expect("the icon is text");
+        assert!(
+            svg.contains(APP_ID),
+            "the embedded icon does not name {APP_ID}; if it was copied from \
+             another app it will name that one instead"
+        );
+    }
 }
