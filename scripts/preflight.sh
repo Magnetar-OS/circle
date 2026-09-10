@@ -3,7 +3,7 @@
 #
 # What a checkout must be true of before anything is built in it.
 #
-# Run from a Circle checkout with the substrate beside it at `../cosmic-pim`.
+# Run from a Circle checkout; it needs nothing beside it.
 # Both callers run this same file — the CI workflow and `just verify-head` —
 # because the previous version of these checks existed twice, once inlined in
 # each, which is the duplicated-invariant bug they were written to catch.
