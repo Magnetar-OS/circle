@@ -204,8 +204,8 @@ All notable changes to this project are documented here. The format follows
   `rust-toolchain.toml`.
 - The Rust version the manifest offered as supported was one nothing ever
   built. `rust-toolchain.toml` pinned the channel `1.98`, which floats to the
-  newest 1.98.x, while `Cargo.toml` declared a 1.98.0 minimum — so every
-  build, local and CI, ran 1.98.1 and 1.98.0 was never exercised. Nothing
+  newest 1.98.x, while `Cargo.toml` declared a 1.98.1 minimum — so every
+  build, local and CI, ran 1.98.1 and 1.98.1 was never exercised. Nothing
   reported it, and nothing could: `rust-version` is a *minimum*, so a manifest
   asking for more than the pinned channel is refused outright while one asking
   for less builds in silence. Both are pinned to 1.98.1 now, and CI fails when

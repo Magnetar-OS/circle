@@ -99,7 +99,7 @@ expect_failure() {
 
 expect_failure "toolchain: manifest below the pinned channel" \
     "Raise both together" \
-    "sed -i 's/^rust-version = \"1.98.1\"/rust-version = \"1.98.0\"/' Cargo.toml"
+    "sed -i 's/^rust-version = \"1.98.1\"/rust-version = \"1.98.1\"/' Cargo.toml"
 
 expect_failure "lockfile: names a crate CI cannot fetch" \
     "cosmic-ext-nib-text" \
