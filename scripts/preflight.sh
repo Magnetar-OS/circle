@@ -104,4 +104,26 @@ $(for m in $missing; do echo "  $m"; done)
 Nothing builds or tests these, so only packaging a release would notice.
 Either commit them, or stop naming them in the justfile and the manifest."
 
+# The generalisation of the check above, since the icon set is only the
+# instance we happened to be bitten by. Every literal repository path named in
+# packaging or CI configuration must exist. `debian/circle` is excluded by
+# name and with a reason — it is the staging root `just install` writes into,
+# so it is generated rather than tracked. A *rule* for skipping absent paths
+# is what this check must not have: "it does not exist, so it is probably
+# generated" is an assertion in a comment, and comments asserting properties
+# are the thing all of this was written to stop.
+named=$(grep -ohE '(resources|i18n|scripts|debian|packaging)/[A-Za-z0-9._/-]+' \
+    justfile packaging/flatpak/*.yml debian/rules .github/workflows/*.yml 2>/dev/null \
+    | sort -u | grep -v '^debian/circle$')
+absent=""
+for path in $named; do
+    [ -e "$path" ] || absent="$absent $path"
+done
+echo "packaging: $(echo $named | wc -w) literal paths named by config"
+[ -z "$absent" ] || fail \
+"packaging or CI names paths this checkout does not contain:
+$(for a in $absent; do echo "  $a"; done)
+A path named by configuration and reached by no build is invisible until the
+job that names it runs."
+
 echo "preflight: this checkout is what it claims to be"
