@@ -83,29 +83,61 @@ verify-head:
         exit 1
     fi
 
-    pim=$(cd ../cosmic-pim 2>/dev/null && pwd) \
+    [ -d ../cosmic-pim ] \
         || { echo "../cosmic-pim is missing; the path dependencies cannot resolve"; exit 1; }
 
-    # Share this checkout's target directory. What is being isolated is the
-    # *source* — a fresh target rebuilds libcosmic into /tmp and fills it —
-    # and nothing here is decided by a build artefact: `include_bytes!` reads
-    # the source tree, and cargo fingerprints the worktree's own path anyway,
-    # so `circle` is rebuilt from the checkout under test either way.
-    export CARGO_TARGET_DIR="$(pwd)/{{cargo-target-dir}}/verify-head"
-    root=$(mktemp -d)
-    trap 'git worktree remove --force "$root/circle" >/dev/null 2>&1 || true; rm -rf "$root"' EXIT
+    # `git archive` rather than a worktree: it writes exactly the tracked files
+    # at HEAD and nothing else, which is the definition being tested — what a
+    # clone contains. A worktree can carry strays, and leaves bookkeeping that
+    # `cargo clean` would orphan. It also stamps every file with the *commit*
+    # time rather than the time of extraction, so re-extracting an unchanged
+    # HEAD leaves cargo's mtime fingerprints intact and the build is
+    # incremental; a worktree checkout stamps "now" and rebuilds everything.
+    #
+    # Both paths are fixed rather than `mktemp`, because cargo fingerprints a
+    # crate by its source path: a fresh directory per run rebuilt `circle` and
+    # every test binary from scratch, ninety seconds whether or not anything
+    # had changed, and a gate that slow before a push is a gate nobody runs.
+    # Sharing this checkout's dependency build is safe here — nothing under
+    # test is decided by an artefact, since `include_bytes!` reads the source.
+    verify="$(pwd)/{{cargo-target-dir}}/verify-head"
+    export CARGO_TARGET_DIR="$verify/build"
+    tree="$verify/tree"
 
-    # The worktree sits one level down so `../cosmic-pim` resolves the way it
-    # does in a real side-by-side checkout, without writing into /tmp's root.
-    ln -s "$pim" "$root/cosmic-pim"
-    git worktree add --detach --quiet "$root/circle" HEAD
+    # One level down, with every sibling of this checkout mirrored beside it,
+    # so relative path dependencies resolve the way they do in a real
+    # side-by-side layout. Mirroring the whole neighbourhood rather than
+    # linking `cosmic-pim` alone is deliberate: the substrate's own manifests
+    # reach further out — `cosmic-pim-mail` names `../../../cosmic-ext-nib` —
+    # and linking one dependency at a time makes this fail again each time
+    # somebody adds another.
+    rm -rf "$tree"
+    mkdir -p "$tree/circle"
+    for sibling in ../*/; do
+        name=$(basename "$sibling")
+        [ "$name" = circle ] && continue
+        ln -sfn "$(cd "$sibling" && pwd)" "$tree/$name"
+    done
+    git archive --format=tar HEAD | tar -x -C "$tree/circle"
 
-    cd "$root/circle"
+    cd "$tree/circle"
     channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
     manifest=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
     [ "$channel" = "$manifest" ] \
         || { echo "rust-toolchain.toml pins $channel; Cargo.toml declares $manifest"; exit 1; }
-    cargo metadata --locked --format-version 1 >/dev/null
+    # A stale lockfile is the same class of lie as a missing file: HEAD says
+    # one dependency graph and resolves to another. Note that path
+    # dependencies make this depend on the *substrate's working tree* — an
+    # uncommitted manifest change in a sibling repository can add a crate to
+    # Circle's graph without a single commit here, so this can go red for a
+    # reason that is not in this repository at all.
+    cargo metadata --locked --format-version 1 >/dev/null || {
+        echo
+        echo "Cargo.lock at HEAD does not describe the graph that resolves today."
+        echo "If nothing changed here, check the sibling path dependencies:"
+        echo "  git -C ../cosmic-pim status --porcelain"
+        exit 1
+    }
 
     just check-all
     echo "HEAD is what it claims to be."
