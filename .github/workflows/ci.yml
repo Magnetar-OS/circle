@@ -21,19 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The substrate is a path dependency and lives in its own repository, so
-      # it has to be checked out beside this one for anything to build. Kept as
-      # a sibling directory because that is what Cargo.toml's `../cosmic-pim`
-      # resolves to.
-      - name: Check out the shared substrate
-        uses: actions/checkout@v5
-        with:
-          repository: Magnetar-OS/cosmic-pim
-          path: cosmic-pim-checkout
-
-      - name: Place the substrate where Cargo.toml expects it
-        run: mv cosmic-pim-checkout ../cosmic-pim
-
       # libcosmic pulls in the Wayland, XKB, and OpenSSL stacks.
       - name: Install build dependencies
         run: |
@@ -56,9 +43,6 @@ jobs:
       # One script, run here and by `just verify-head`. These checks lived
       # inlined here *and* in the justfile, which is two copies of one rule in
       # a repository whose bugs this week were all duplicated invariants.
-      #
-      # It runs after the substrate is placed, because the lockfile check
-      # derives what CI can fetch from what cosmic-pim actually contains.
       - name: Preflight — this checkout is what it claims to be
         run: ./scripts/preflight.sh
 

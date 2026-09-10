@@ -88,9 +88,6 @@ verify-head:
         exit 1
     fi
 
-    [ -d ../cosmic-pim ] \
-        || { echo "../cosmic-pim is missing; the path dependencies cannot resolve"; exit 1; }
-
     # `git archive` rather than a worktree: it writes exactly the tracked files
     # at HEAD and nothing else, which is the definition being tested — what a
     # clone contains. A worktree can carry strays, and leaves bookkeeping that
@@ -109,20 +106,8 @@ verify-head:
     export CARGO_TARGET_DIR="$verify/build"
     tree="$verify/tree"
 
-    # One level down, with every sibling of this checkout mirrored beside it,
-    # so relative path dependencies resolve the way they do in a real
-    # side-by-side layout. Mirroring the whole neighbourhood rather than
-    # linking `cosmic-pim` alone is deliberate: the substrate's own manifests
-    # reach further out — `cosmic-pim-mail` names `../../../cosmic-ext-nib` —
-    # and linking one dependency at a time makes this fail again each time
-    # somebody adds another.
     rm -rf "$tree"
     mkdir -p "$tree/circle"
-    for sibling in ../*/; do
-        name=$(basename "$sibling")
-        [ "$name" = circle ] && continue
-        ln -sfn "$(cd "$sibling" && pwd)" "$tree/$name"
-    done
     git archive --format=tar HEAD | tar -x -C "$tree/circle"
 
     cd "$tree/circle"
@@ -132,15 +117,12 @@ verify-head:
     # fetch" is a more actionable failure than "your lock is out of date".
     ./scripts/preflight.sh
 
-    # Path dependencies make the *substrate's working tree* part of this
-    # graph, so an uncommitted manifest change in a sibling repository can add
-    # a crate here without a commit in either. This can go red for a reason
-    # that is not in this repository at all.
+    # preflight only reads files; this resolves the graph, so it is what
+    # catches a lockfile that no longer describes the manifest at HEAD.
     cargo metadata --locked --format-version 1 >/dev/null || {
         echo
         echo "Cargo.lock at HEAD does not describe the graph that resolves today."
-        echo "If nothing changed here, check the sibling path dependencies:"
-        echo "  git -C ../cosmic-pim status --porcelain"
+        echo "Run cargo check and commit the lockfile alongside the manifest."
         exit 1
     }
 
@@ -177,10 +159,10 @@ check-json: (check '--message-format=json')
 
 # Checks formatting without changing anything.
 #
-# `-p circle`, never `--all`: cosmic-pim is a *path* dependency, so `--all`
-# reaches through it and reformats the substrate's source in its own checkout.
-# That silently rewrites another repository — including whatever is uncommitted
-# in it — as a side effect of formatting this one.
+# `-p circle` rather than `--all`. The substrate resolves from crates.io now,
+# so `--all` no longer reaches into a sibling checkout, but naming the package
+# keeps that true if a `[patch]` is ever uncommented for local work — which
+# would put the substrate's working tree back in this workspace.
 fmt-check:
     cargo fmt -p circle -- --check
 

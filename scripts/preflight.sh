@@ -83,25 +83,17 @@ Raise both together — cargo will not tell you when the manifest is the lower."
 #
 # `cargo --locked` catches a lockfile that is stale. It cannot catch one that
 # is too full, and that is the direction that hurts: a lock naming a crate
-# from a repository CI does not check out resolves perfectly on the machine
-# that committed it and fails only where it matters.
+# built from a local path resolves perfectly on the machine that committed it
+# and fails only where it matters.
 #
-# A lockfile entry with no `source` is built from a local path. CI checks out
-# this repository and cosmic-pim and nothing else, so the allowed set is
-# derived from what cosmic-pim actually contains rather than written down —
-# it stays true when the substrate gains a crate, and fails when it gains a
-# repository.
+# A lockfile entry with no `source` is built from a local path. The substrate
+# resolves from crates.io now, so this checkout is the only crate that may
+# appear without one — a second name means a path dependency crept back in,
+# and a path dependency here would make a release build prefer a working tree
+# next door over the version the manifest names.
 #
 # This is the file that gets staged without being read, because a lockfile
 # diff always looks like noise, which is why it wants a check and not a habit.
-[ -d ../cosmic-pim ] || fail "../cosmic-pim is missing; the path dependencies cannot resolve"
-
-allowed=$(
-    printf 'circle\n'
-    for crate in ../cosmic-pim/crates/*/Cargo.toml; do
-        sed -n 's/^name = "\(.*\)"/\1/p' "$crate" | head -1
-    done
-)
 local_pkgs=$(awk '
     /^\[\[package\]\]/ { name=""; src=0; next }
     /^name = /         { gsub(/"/,""); name=$3; next }
@@ -111,13 +103,12 @@ local_pkgs=$(awk '
 ' Cargo.lock)
 
 echo "lockfile: local crates $(echo $local_pkgs)"
-stray=$(comm -23 <(echo "$local_pkgs" | sort -u) <(echo "$allowed" | sort -u))
+stray=$(comm -23 <(echo "$local_pkgs" | sort -u) <(printf 'circle\n'))
 [ -z "$stray" ] || fail \
-"Cargo.lock names local crates that CI does not check out:
+"Cargo.lock names crates built from a local path:
 $(echo "$stray" | sed 's/^/  /')
-CI clones this repository and cosmic-pim only, so these resolve here and
-nowhere else. Either they do not belong in the graph, or the workflow has to
-fetch them in the same change."
+Only circle itself may resolve that way. Everything else comes from crates.io,
+so these resolve here and nowhere else — a path dependency has come back."
 
 # --- Files named only by packaging ------------------------------------------
 #
