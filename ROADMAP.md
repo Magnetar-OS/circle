@@ -292,11 +292,15 @@ write-back — and network avatar fetching stays off by default, if ever.
   (`cosmic-ext-nib`), and because `cosmic-pim-sync` depends on
   `cosmic-pim-mail`, Circle inherited it; CI clones only `cosmic-pim`, so
   landing it ungated turns Circle's CI red on a crate Circle never named.
-  `just verify-head` catches this, which is what it is for. Two rules follow:
-  never commit a `Cargo.lock` that grew entries you cannot trace to a change
-  in *this* repository, and treat a substrate manifest change as a
-  cross-repository release — every `-sync` consumer moves in the same change
-  or none does.
+  Half of this is enforced and half is not, and the difference is where the
+  risk actually sits. **Enforced:** `scripts/preflight.sh` fails when
+  `Cargo.lock` names a local crate CI does not check out — run by CI and by
+  `just verify-head`, so a lockfile that grew a fourth repository cannot be
+  committed quietly. **Not enforced, and unenforceable from here:** a
+  substrate manifest change is a cross-repository release, and every `-sync`
+  consumer has to move in the same change or none does. No check in this
+  repository can see the other consumers, so that one is a convention people
+  keep or fail to keep.
 - **libcosmic tracks a moving branch.** Unpinned by convention; a breaking
   toolkit change can land any week. `Cargo.lock` is the shield; budget for
   an update pass per milestone.

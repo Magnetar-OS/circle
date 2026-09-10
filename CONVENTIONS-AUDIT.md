@@ -78,6 +78,12 @@ Circle's app id, so a file copied wholesale from a sibling repository fails the
 build — verified by copying Slate's actual icon over Circle's. That catches the
 copy, not wrong art; only looking at it does that.
 
+The other half of the icon problem is that nothing *reads* the installed set:
+`just install` and the Flatpak manifest name one file per size, no build opens
+them, and no test does either, so a rename would surface only when somebody
+packaged a release. `scripts/preflight.sh` reads the sizes out of the
+justfile's own declarations and fails when a named file is absent.
+
 ### 3. Icon lookups had no fallback chain
 
 Every lookup was a bare `icon::from_name(name)`, so libcosmic's default

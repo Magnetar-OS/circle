@@ -143,6 +143,12 @@ just check-all    # formatting, clippy, tests, and metadata validation
 just verify-head  # the same, against a clean checkout of HEAD
 ```
 
+`verify-head` extracts HEAD into a throwaway tree and runs the gate there,
+because the working tree is not what CI sees: a file named by committed
+configuration but never committed resolves here and nowhere else. The checks
+that do not need a build live in `scripts/preflight.sh`, which CI runs as its
+first step and `verify-head` runs again inside the extraction.
+
 Or with cargo directly:
 
 ```sh
