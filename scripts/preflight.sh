@@ -39,7 +39,18 @@ fail() { echo; echo "$@"; exit 1; }
 # are the thing all of this was written to stop.
 named=$(grep -ohE '((resources|i18n|scripts|debian|packaging)/[A-Za-z0-9._/-]+|Cargo\.(toml|lock)|rust-toolchain\.toml)' \
     justfile packaging/flatpak/*.yml debian/rules .github/workflows/*.yml scripts/*.sh 2>/dev/null \
-    | sort -u | grep -v '^debian/circle$')
+    | sort -u | grep -v '^debian/circle$' || true)
+
+# A pattern that matches nothing is a broken pattern, not a repository that
+# names no paths — this one names ten. Without a floor, breaking the regex
+# turns the check into a no-op that reports success, which is how coverage
+# leaves quietly. `|| true` above is what makes this reachable: under
+# `pipefail` a grep matching nothing kills the assignment, and the script
+# exited with status 1 and no output at all.
+[ -n "$named" ] || fail \
+"the configuration sweep matched nothing, so its pattern is broken.
+Packaging and CI name paths in this repository; a sweep finding none of them
+is not a passing check, it is a check that has stopped looking." 
 absent=""
 for path in $named; do
     [ -e "$path" ] || absent="$absent $path"
@@ -121,7 +132,11 @@ fetch them in the same change."
 # clean clone and in a `git archive` extraction — the only two places this
 # runs — existing and being committed are the same thing.
 appid=$(sed -n "s/^appid := '\(.*\)'/\1/p" justfile)
-icon_dir=$(sed -n 's/^icon-dir := //p' justfile | grep -oE "'[^']*'" | tr -d "'" | paste -sd/)
+# `|| true` for the same reason: without it a missing `icon-dir` line kills
+# this assignment under `pipefail`, and the explicit guard below — written for
+# exactly that case — never runs. An informative failure message placed after
+# a pipeline that aborts the script is unreachable.
+icon_dir=$(sed -n 's/^icon-dir := //p' justfile | grep -oE "'[^']*'" | tr -d "'" | paste -sd/ || true)
 sizes=$(sed -n "s/^icon-sizes := '\(.*\)'/\1/p" justfile)
 [ -n "$appid" ] && [ -n "$icon_dir" ] && [ -n "$sizes" ] \
     || fail "cannot read appid, icon-dir or icon-sizes out of the justfile"

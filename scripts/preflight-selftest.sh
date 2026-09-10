@@ -117,6 +117,19 @@ expect_failure "config: a file named by config and read by other checks is gone"
     "does not contain" \
     "rm -f rust-toolchain.toml"
 
+# The two below are not bad *inputs* — they are preflight breaking, and the
+# question is whether it says so or dies quietly. Both used to die quietly:
+# under `pipefail` a grep matching nothing killed the assignment, so the script
+# exited 1 with no output, and the explicit guard written for the second case
+# sat after the pipeline that aborted before reaching it.
+expect_failure "self: a broken sweep pattern is not a passing check" \
+    "stopped looking" \
+    "sed -i \"s|-ohE '((res|-ohE 'ZZZ((res|\" scripts/preflight.sh"
+
+expect_failure "self: the justfile no longer declares what packaging installs" \
+    "cannot read appid" \
+    "sed -i '/^icon-dir := /d' justfile"
+
 echo
 if [ "$failures" -eq 0 ]; then
     echo "preflight self-test: every check fails on the input it exists for"
