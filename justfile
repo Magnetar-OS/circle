@@ -125,6 +125,40 @@ verify-head:
     manifest=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
     [ "$channel" = "$manifest" ] \
         || { echo "rust-toolchain.toml pins $channel; Cargo.toml declares $manifest"; exit 1; }
+    # `--locked` below catches a lock that is *stale*. It cannot catch one
+    # that is too *full*, and that is the direction that hurts: a lockfile
+    # carrying a crate from a repository CI does not check out resolves
+    # perfectly here — the directory is on this disk — and fails only on a
+    # machine that has just this repo and cosmic-pim. Same asymmetry as the
+    # toolchain pin, where cargo reports the harmless direction and is silent
+    # about the harmful one.
+    #
+    # A lockfile entry with no `source` is built from a local path. CI checks
+    # out this repository and cosmic-pim and nothing else, so those are the
+    # only local packages that may appear. This is also the file that gets
+    # staged without being read, because a lockfile diff always looks like
+    # noise — which is why it wants a check rather than a habit.
+    allowed=$(printf 'circle\n'; for f in ../cosmic-pim/crates/*/Cargo.toml; do
+        sed -n 's/^name = "\(.*\)"/\1/p' "$f" | head -1
+    done)
+    local_pkgs=$(awk '
+        /^\[\[package\]\]/ { name=""; src=0; next }
+        /^name = / { gsub(/"/,""); name=$3; next }
+        /^source = / { src=1; next }
+        /^$/ { if (name != "" && src == 0) print name; name="" }
+        END { if (name != "" && src == 0) print name }
+    ' Cargo.lock)
+    stray=$(comm -23 <(echo "$local_pkgs" | sort -u) <(echo "$allowed" | sort -u))
+    if [ -n "$stray" ]; then
+        echo
+        echo "Cargo.lock names local crates that CI does not check out:"
+        echo "$stray" | sed 's/^/  /'
+        echo "CI clones this repository and cosmic-pim only, so these resolve"
+        echo "here and nowhere else. Either they do not belong in the graph, or"
+        echo "the workflow has to fetch them in the same change."
+        exit 1
+    fi
+
     # A stale lockfile is the same class of lie as a missing file: HEAD says
     # one dependency graph and resolves to another. Note that path
     # dependencies make this depend on the *substrate's working tree* — an
