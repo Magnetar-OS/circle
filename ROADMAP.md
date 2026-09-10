@@ -282,6 +282,21 @@ write-back — and network avatar fetching stays off by default, if ever.
   are substrate work surfaced here. Circle milestones must not silently
   block on cosmic-pim; when they would, ship the milestone without the item
   and say so in the changelog.
+- **A path dependency makes the sibling's working tree a build input.** The
+  substrate is `path = "../cosmic-pim"` until it is published, and Cargo reads
+  what is *on disk* there, not what is committed. So an uncommitted manifest
+  edit in cosmic-pim changes Circle's dependency graph without a commit in
+  either repository: `Cargo.lock` re-dirties on the next build, and
+  `cargo metadata --locked` starts failing at a HEAD nobody touched. It
+  happened — `cosmic-pim-mail` gained a dependency on a *fourth* repository
+  (`cosmic-ext-nib`), and because `cosmic-pim-sync` depends on
+  `cosmic-pim-mail`, Circle inherited it; CI clones only `cosmic-pim`, so
+  landing it ungated turns Circle's CI red on a crate Circle never named.
+  `just verify-head` catches this, which is what it is for. Two rules follow:
+  never commit a `Cargo.lock` that grew entries you cannot trace to a change
+  in *this* repository, and treat a substrate manifest change as a
+  cross-repository release — every `-sync` consumer moves in the same change
+  or none does.
 - **libcosmic tracks a moving branch.** Unpinned by convention; a breaking
   toolkit change can land any week. `Cargo.lock` is the shield; budget for
   an update pass per milestone.
