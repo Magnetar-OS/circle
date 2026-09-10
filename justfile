@@ -46,6 +46,70 @@ default: build-release
 # Everything CI runs, in the order that fails cheapest first.
 check-all: fmt-check check test validate-metadata
 
+# `check-all`, but against a clean checkout of HEAD instead of the working tree.
+#
+# The working tree is not what CI sees, and in a checkout several sessions
+# share it is not what anyone sees. The failure this exists for: a source file
+# names a path — `include_bytes!` here, the icon lists in the flatpak manifest
+# — that resolves only because an *untracked* file happens to sit at it. That
+# compiles on this machine and fails on every clone. Circle shipped exactly
+# that state for twenty commits. No test can find it, because tests run where
+# the file is; only a checkout without your untracked files can.
+#
+# Also asserts what `git status` cannot: that the ignore rules deciding what
+# is invisible live in the repository rather than in a developer's global
+# config, since a rule in `~/.config/git/ignore` bounds a different set on
+# every machine.
+verify-head:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A stranger's view: global excludes disabled, so the only thing hidden is
+    # what the repository itself hides. Anything listed here is either really
+    # untracked, or ignored by a rule in someone's `~/.config/git/ignore` —
+    # which bounds a different set on every machine, and so cannot be relied
+    # on to say what a clone contains. Both want reporting; neither is
+    # distinguishable from the other from inside this checkout.
+    #
+    # Comparing the two views is the point. Listing what the *local* view
+    # ignores would be vacuous: with global excludes off, everything still
+    # listed as ignored is by construction ignored by `.gitignore`, so the
+    # assertion could never fail.
+    stranger=$(git -c core.excludesFile=/dev/null status --porcelain -uall | sed -n 's/^?? //p')
+    if [ -n "$stranger" ]; then
+        echo "a clean clone would see these as untracked:"
+        echo "$stranger" | sed 's/^/  /'
+        echo "either commit them, or ignore them with a rule in .gitignore"
+        exit 1
+    fi
+
+    pim=$(cd ../cosmic-pim 2>/dev/null && pwd) \
+        || { echo "../cosmic-pim is missing; the path dependencies cannot resolve"; exit 1; }
+
+    # Share this checkout's target directory. What is being isolated is the
+    # *source* — a fresh target rebuilds libcosmic into /tmp and fills it —
+    # and nothing here is decided by a build artefact: `include_bytes!` reads
+    # the source tree, and cargo fingerprints the worktree's own path anyway,
+    # so `circle` is rebuilt from the checkout under test either way.
+    export CARGO_TARGET_DIR="$(pwd)/{{cargo-target-dir}}/verify-head"
+    root=$(mktemp -d)
+    trap 'git worktree remove --force "$root/circle" >/dev/null 2>&1 || true; rm -rf "$root"' EXIT
+
+    # The worktree sits one level down so `../cosmic-pim` resolves the way it
+    # does in a real side-by-side checkout, without writing into /tmp's root.
+    ln -s "$pim" "$root/cosmic-pim"
+    git worktree add --detach --quiet "$root/circle" HEAD
+
+    cd "$root/circle"
+    channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
+    manifest=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+    [ "$channel" = "$manifest" ] \
+        || { echo "rust-toolchain.toml pins $channel; Cargo.toml declares $manifest"; exit 1; }
+    cargo metadata --locked --format-version 1 >/dev/null
+
+    just check-all
+    echo "HEAD is what it claims to be."
+
 # Runs `cargo clean`
 clean:
     cargo clean

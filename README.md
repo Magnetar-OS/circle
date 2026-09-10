@@ -140,6 +140,7 @@ just              # build-release
 just run          # build and run
 just install      # install binary, desktop entry, metainfo, and icon
 just check-all    # formatting, clippy, tests, and metadata validation
+just verify-head  # the same, against a clean checkout of HEAD
 ```
 
 Or with cargo directly:
