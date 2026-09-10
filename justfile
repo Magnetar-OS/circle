@@ -44,7 +44,12 @@ launcher-plugin-dst := base-dir / 'share' / 'pop-launcher' / 'plugins' / name / 
 default: build-release
 
 # Everything CI runs, in the order that fails cheapest first.
-check-all: fmt-check check test validate-metadata
+check-all: fmt-check check test validate-metadata preflight-selftest
+
+# Proves each preflight check fails on the input it exists for. On `check-all`
+# rather than beside it, because a gate nobody is obliged to run is a practice.
+preflight-selftest:
+    ./scripts/preflight-selftest.sh
 
 # `check-all`, but against a clean checkout of HEAD instead of the working tree.
 #
