@@ -53,33 +53,14 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
-      # `rust-toolchain.toml` says it is "kept in agreement with rust-version
-      # in Cargo.toml". They were not: the channel was `1.98`, which floats to
-      # the newest 1.98.x, while the manifest declared 1.98.0 as the minimum.
-      # So the version offered as supported was one nothing ever built —
-      # every build, local and CI, was on 1.98.1.
+      # One script, run here and by `just verify-head`. These checks lived
+      # inlined here *and* in the justfile, which is two copies of one rule in
+      # a repository whose bugs this week were all duplicated invariants.
       #
-      # Cargo cannot report this. `rust-version` is a *minimum*, so a manifest
-      # demanding more than the pinned channel is refused outright while one
-      # demanding less builds in silence — measured here in both directions,
-      # not recalled. The silent direction is the one a routine toolchain bump
-      # produces, so it is the one that needs a gate.
-      #
-      # Both are pinned to an exact patch now, so the declared minimum is the
-      # version actually built and this comparison can be equality.
-      - name: Toolchain and manifest agree
-        run: |
-          channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)
-          manifest=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
-          test -n "$channel" || { echo "no channel in rust-toolchain.toml"; exit 1; }
-          test -n "$manifest" || { echo "no rust-version in Cargo.toml"; exit 1; }
-          if [ "$channel" != "$manifest" ]; then
-            echo "rust-toolchain.toml pins $channel; Cargo.toml declares $manifest."
-            echo "Raise both together — cargo will not tell you when the manifest"
-            echo "is the lower of the two."
-            exit 1
-          fi
-          echo "both at $channel"
+      # It runs after the substrate is placed, because the lockfile check
+      # derives what CI can fetch from what cosmic-pim actually contains.
+      - name: Preflight — this checkout is what it claims to be
+        run: ./scripts/preflight.sh
 
       - name: Formatting
         run: just fmt-check
