@@ -71,4 +71,37 @@ CI clones this repository and cosmic-pim only, so these resolve here and
 nowhere else. Either they do not belong in the graph, or the workflow has to
 fetch them in the same change."
 
+# --- Files named only by packaging ------------------------------------------
+#
+# `just install` and the flatpak manifest name one icon per declared size.
+# Nothing else reaches those paths: no build reads them, no test opens them,
+# so a rename or a deletion is invisible until somebody packages a release.
+# That is how this repository shipped a HEAD whose `include_bytes!` named a
+# file nobody had committed — the same shape with a different extension.
+#
+# The set is read out of the justfile's own declarations rather than repeated
+# here, so adding a size to `icon-sizes` extends this check by itself. In a
+# clean clone and in a `git archive` extraction — the only two places this
+# runs — existing and being committed are the same thing.
+appid=$(sed -n "s/^appid := '\(.*\)'/\1/p" justfile)
+icon_dir=$(sed -n 's/^icon-dir := //p' justfile | grep -oE "'[^']*'" | tr -d "'" | paste -sd/)
+sizes=$(sed -n "s/^icon-sizes := '\(.*\)'/\1/p" justfile)
+[ -n "$appid" ] && [ -n "$icon_dir" ] && [ -n "$sizes" ] \
+    || fail "cannot read appid, icon-dir or icon-sizes out of the justfile"
+
+missing=""
+for size in $sizes; do
+    [ -f "$icon_dir/$size/apps/$appid.png" ] || missing="$missing $icon_dir/$size/apps/$appid.png"
+done
+for svg in "$icon_dir/scalable/apps/$appid.svg" "$icon_dir/symbolic/apps/$appid-symbolic.svg"; do
+    [ -f "$svg" ] || missing="$missing $svg"
+done
+
+echo "packaging: $(echo $sizes | wc -w) icon sizes plus scalable and symbolic"
+[ -z "$missing" ] || fail \
+"packaging names files this checkout does not contain:
+$(for m in $missing; do echo "  $m"; done)
+Nothing builds or tests these, so only packaging a release would notice.
+Either commit them, or stop naming them in the justfile and the manifest."
+
 echo "preflight: this checkout is what it claims to be"
