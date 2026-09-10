@@ -209,9 +209,12 @@ Everything in Track A is built and the parity table above is closed.
   fifteen items with the evidence for each. It found three real problems (CI
   building on the wrong toolchain, the icon being Slate's, no icon fallback
   chains) and records four deliberate divergences.
-- **Per-size icons** — 16, 24, 32, 48, 64 and scalable, each drawn on its own
-  pixel grid. This is where the audit found Circle had been shipping Slate's
-  calendar icon byte for byte.
+- **Icons** — named for the application id, as item 4 requires:
+  `com.magnetaros.Circle.svg` scalable, PNGs rasterised from it at eight sizes
+  through 512, and a monochrome `-symbolic` variant for the panel and the app
+  grid. This is where the audit found Circle had been shipping Slate's calendar
+  icon byte for byte; a repeat of that now fails the build, because each source
+  names itself and a test asserts the embedded bytes carry Circle's app id.
 - **Screenshot** — one, in the metainfo, taken on a real COSMIC session
   against a scratch address book.
 - **Translation** — Greek shipped earlier; [TRANSLATING.md](TRANSLATING.md)

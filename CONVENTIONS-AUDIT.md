@@ -63,11 +63,20 @@ differs in the two things the eye catches first: the header is Circle's own
 branding purple (`#842bd2`, the AppStream `<branding>` primary) rather than
 Slate's blue, and the shape on it is a person.
 
-Drawn once per size — 16, 24, 32, 48, 64 and scalable — with coordinates on
-each size's own pixel grid, which is item 10's higher-effort option. Below 32
-the name lines are dropped: they are thinner than a pixel there and only muddy
-the card. The justfile and the Flatpak manifest install the set; `debian/` gets
-it for free because its `rules` calls the justfile.
+The set was later renamed for the application id and widened, which is what
+item 4 asks for: `com.magnetaros.Circle.svg` scalable, PNGs rasterised from it
+at eight sizes through 512, and a monochrome `-symbolic` variant for the panel
+and the app grid. The justfile and the Flatpak manifest install the same names;
+`debian/` gets it for free because its `rules` calls the justfile.
+
+Neither the naming nor the sizes address the bug itself, though, and it is
+worth being clear about that: every property of the wrong icon was correct
+except its subject. It was committed, correctly named, correctly sized, valid
+SVG and installed exactly where it belonged. What now catches a repeat is that
+each icon source names itself and a test asserts the embedded bytes carry
+Circle's app id, so a file copied wholesale from a sibling repository fails the
+build — verified by copying Slate's actual icon over Circle's. That catches the
+copy, not wrong art; only looking at it does that.
 
 ### 3. Icon lookups had no fallback chain
 
