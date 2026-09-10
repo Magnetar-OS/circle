@@ -17,11 +17,12 @@ xdgen = "0.1"
 
 [dependencies]
 # --- the shared PIM substrate (MPL-2.0) ---
-# Paths until cosmic-pim is pushed; then git tags, with a commented [patch]
-# below for local work. See slate/Cargo.toml for the same note in full.
-cosmic-pim-core = { path = "../cosmic-pim/crates/cosmic-pim-core" }
-cosmic-pim-accounts = { path = "../cosmic-pim/crates/cosmic-pim-accounts" }
-cosmic-pim-sync = { path = "../cosmic-pim/crates/cosmic-pim-sync" }
+# Registry versions: cosmic-pim 1.0.0 is on crates.io. A commented [patch]
+# below swaps in the sibling checkout for local work. See slate/Cargo.toml for
+# the same note in full.
+cosmic-pim-core = "1.0.0"
+cosmic-pim-accounts = "1.0.0"
+cosmic-pim-sync = "1.0.0"
 
 # --- COSMIC / UI ---
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
@@ -86,7 +87,7 @@ features = [
 [dev-dependencies]
 # The write-path tests read the push queue back to prove a queued save carries
 # its pre-edit base — the queue lives behind caldav's VdirStore.
-cosmic-pim-caldav = { path = "../cosmic-pim/crates/cosmic-pim-caldav" }
+cosmic-pim-caldav = "1.0.0"
 # Integration tests write real address books to a scratch directory rather than
 # mocking the store: the thing under test is that bytes survive a round trip
 # through the filesystem, which a mock cannot demonstrate.
@@ -121,3 +122,19 @@ strip = true
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Develop against the sibling checkout without cutting a release on every
+# change. The key is `crates-io` because that is where these resolve from.
+# Uncomment for local work — do not reintroduce paths above, or a release
+# build would silently prefer whatever is in the working tree next door.
+#
+# [patch.crates-io]
+# cosmic-pim-core = { path = "../cosmic-pim/crates/cosmic-pim-core" }
+# cosmic-pim-accounts = { path = "../cosmic-pim/crates/cosmic-pim-accounts" }
+# cosmic-pim-sync = { path = "../cosmic-pim/crates/cosmic-pim-sync" }
+# cosmic-pim-caldav = { path = "../cosmic-pim/crates/cosmic-pim-caldav" }
+
+# Uncomment to test against a locally-cloned libcosmic.
+# [patch.'https://github.com/pop-os/libcosmic']
+# libcosmic = { path = "../libcosmic" }
+# cosmic-config = { path = "../libcosmic/cosmic-config" }
