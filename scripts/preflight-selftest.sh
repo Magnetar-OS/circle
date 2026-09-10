@@ -59,6 +59,23 @@ if ! run >/dev/null 2>&1; then
 fi
 echo "ok    baseline: a clean extraction of HEAD passes"
 
+# --- Provenance: is the script under test the one being edited? --------------
+#
+# The negative control below proves a broken check is noticed, but it cannot
+# prove *which copy* it broke: neutering happens after the scripts are placed,
+# so a harness that placed the committed copy would disable that one and stay
+# green. This asserts by content instead of by inference.
+#
+# Compared against the literal path rather than through the variable the
+# harness uses, because a rewiring is exactly what changes the variable, and a
+# control that follows the rewiring cannot see it.
+if ! cmp -s scripts/preflight.sh "$tree/scripts/preflight.sh"; then
+    echo "PROVENANCE FAILED — the extracted tree is not running the working copy"
+    echo "of scripts/preflight.sh, so every row below tests some other version."
+    exit 1
+fi
+echo "ok    provenance: the working copy of preflight is what is under test"
+
 # --- Each check, against the input it exists for -----------------------------
 # $1 label, $2 expected substring in the failure, $3 shell that breaks the tree
 expect_failure() {
