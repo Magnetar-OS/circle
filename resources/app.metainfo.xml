@@ -74,7 +74,7 @@
     <color type="primary" scheme_preference="dark">#c93d3d</color>
   </branding>
   <releases>
-    <release version="0.1.0" date="2026-08-24"> <!-- x-release-kit-version-date -->
+    <release version="1.0.1" date="2026-09-16"> <!-- x-release-kit-version-date -->
       <description>
         <p>First release.</p>
       </description>

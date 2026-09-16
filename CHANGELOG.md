@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-16
+
 ### Added
 
 - **Attachments.** A scan, a contract, a photo of a whiteboard — kept with a
@@ -221,3 +223,6 @@ All notable changes to this project are documented here. The format follows
 - Every icon-only button — the mail, call, and browser actions, the remove
   buttons in the editor, and the back button in the narrow layout — now has a
   tooltip. An icon alone is not a name.
+
+[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Magnetar-OS/circle/releases/tag/v1.0.1
