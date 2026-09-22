@@ -82,5 +82,13 @@ pub fn bar(
         ),
     );
 
-    vec![menu::bar(vec![file, edit, view]).into()]
+    // Envelope's menu geometry, for the same reasons: the default
+    // `Uniform(30)` height gives every divider a full row, and the default
+    // 150 width ellipsizes labels and leaves the shortcut column no room.
+    vec![
+        menu::bar(vec![file, edit, view])
+            .item_height(menu::ItemHeight::Dynamic(36))
+            .item_width(menu::ItemWidth::Uniform(260))
+            .into(),
+    ]
 }
