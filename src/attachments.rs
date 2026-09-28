@@ -60,7 +60,8 @@ pub fn blob_dir(contacts_root: &Path) -> PathBuf {
 
 /// Copies a file into the blob directory and describes it.
 ///
-/// Idempotent: a file already stored under its digest is not written again.
+/// Idempotent: a file already stored whole under its digest is not written
+/// again.
 pub fn store(contacts_root: &Path, source: &Path) -> Result<Attachment, String> {
     let size = std::fs::metadata(source)
         .map_err(|why| format!("{}: {why}", file_label(source)))?
@@ -84,9 +85,13 @@ pub fn store(contacts_root: &Path, source: &Path) -> Result<Attachment, String> 
     std::fs::create_dir_all(&dir).map_err(|why| why.to_string())?;
     let path = dir.join(&blob);
     // Already stored: same bytes, same name, nothing to do. Writing anyway
-    // would be harmless and slower.
-    if !path.exists() {
-        std::fs::write(&path, &bytes).map_err(|why| why.to_string())?;
+    // would be harmless and slower. The size check catches a blob a crash
+    // cut short before blobs were written atomically, which the name alone
+    // would vouch for forever.
+    let stored = std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64);
+    if !stored {
+        cosmic_pim_core::atomic::write_bytes(&path, &bytes, None)
+            .map_err(|why| format!("{}: {why}", path.display()))?;
     }
 
     Ok(Attachment {
@@ -246,6 +251,25 @@ mod tests {
 
         assert_eq!(a.blob, b.blob);
         assert_eq!(std::fs::read_dir(blob_dir(&root)).unwrap().count(), 1);
+    }
+
+    /// A blob cut short by an interrupted write still carries the digest's
+    /// name. Trusting the name alone kept the torn copy forever; attaching the
+    /// same file again has to repair it.
+    #[test]
+    fn a_torn_blob_is_rewritten_when_the_file_is_attached_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("contacts");
+        let file = source(dir.path(), "scan.pdf", b"a business card");
+        let attachment = store(&root, &file).unwrap();
+        std::fs::write(path(&root, &attachment), b"a busi").unwrap();
+
+        store(&root, &file).unwrap();
+
+        assert_eq!(
+            std::fs::read(path(&root, &attachment)).unwrap(),
+            b"a business card"
+        );
     }
 
     #[test]
