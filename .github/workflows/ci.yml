@@ -19,7 +19,7 @@ jobs:
     name: Check, lint, test, and validate metadata
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # libcosmic pulls in the Wayland, XKB, and OpenSSL stacks.
       - name: Install build dependencies
@@ -38,7 +38,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       # One script, run here and by `just verify-head`. These checks lived
       # inlined here *and* in the justfile, which is two copies of one rule in
