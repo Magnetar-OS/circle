@@ -568,8 +568,7 @@ impl cosmic::Application for AppModel {
         // Blobs whose contact was deleted without the delete being undone are
         // orphans. Swept here rather than at delete time, because a delete is
         // undoable and bytes removed then could not come back.
-        let swept =
-            crate::attachments::prune_orphans(&model.contacts_root, &model.crm.referenced_blobs());
+        let swept = crate::attachments::sweep_orphans(&model.contacts_root, &model.crm);
         if swept > 0 {
             tracing::info!(count = swept, "removed orphaned attachments");
         }

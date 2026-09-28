@@ -153,6 +153,21 @@ pub fn prune_orphans(
     removed
 }
 
+/// The start-up sweep: every blob `crm` does not name is removed — but only
+/// when `crm` read every record there is.
+///
+/// A record that failed to load still names its blobs; they are simply
+/// invisible. Sweeping against a partial reference set deletes the only copy
+/// of a file the user attached, and nothing could bring it back. Skipping the
+/// sweep costs some disk until the record is readable again.
+pub fn sweep_orphans(contacts_root: &Path, crm: &crate::crm::CrmStore) -> usize {
+    if !crm.read_every_record() {
+        tracing::warn!("a CRM record could not be read; not sweeping attachments this time");
+        return 0;
+    }
+    prune_orphans(contacts_root, &crm.referenced_blobs())
+}
+
 /// A lowercase extension, if the name has a usable one.
 ///
 /// Long or odd extensions are dropped rather than carried into a file name:

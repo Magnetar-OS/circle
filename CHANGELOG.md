@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
   wholesale, so a CSV with a name and a UID erased the card's emails, numbers,
   addresses and name parts. A row now only adds: a value it carries replaces
   or joins the card's, and everything else is left as it was.
+- An unreadable notes record no longer lets the start-up clean-up delete the
+  attachments it names; the clean-up waits until every record reads.
 
 ## [1.1.0] - 2026-09-22
 

@@ -89,6 +89,10 @@ impl Record {
 pub struct CrmStore {
     dir: PathBuf,
     records: HashMap<CardRef, Record>,
+    /// Record files the last reload could not read. Their contents — and the
+    /// attachments they name — are unknown, which matters to anything that
+    /// decides by absence; see [`Self::read_every_record`].
+    unreadable: usize,
 }
 
 impl CrmStore {
@@ -99,6 +103,7 @@ impl CrmStore {
         let mut store = Self {
             dir: contacts_root.join(".crm"),
             records: HashMap::new(),
+            unreadable: 0,
         };
         store.reload();
         store
@@ -107,6 +112,7 @@ impl CrmStore {
     /// Re-reads every record from disk.
     pub fn reload(&mut self) {
         self.records.clear();
+        self.unreadable = 0;
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return; // No directory yet: nothing recorded, which is fine.
         };
@@ -120,16 +126,33 @@ impl CrmStore {
             };
             let Some(card) = decode_key(stem) else {
                 tracing::warn!(?path, "skipping a CRM record with an unreadable name");
+                self.unreadable += 1;
                 continue;
             };
             match std::fs::read_to_string(&path).map(|t| serde_json::from_str::<Record>(&t)) {
                 Ok(Ok(record)) => {
                     self.records.insert(card, record);
                 }
-                Ok(Err(why)) => tracing::warn!(?path, %why, "skipping an unreadable CRM record"),
-                Err(why) => tracing::warn!(?path, %why, "skipping an unreadable CRM record"),
+                Ok(Err(why)) => {
+                    tracing::warn!(?path, %why, "skipping an unreadable CRM record");
+                    self.unreadable += 1;
+                }
+                Err(why) => {
+                    tracing::warn!(?path, %why, "skipping an unreadable CRM record");
+                    self.unreadable += 1;
+                }
             }
         }
+    }
+
+    /// Whether the last reload read every record file there was.
+    ///
+    /// `false` means some record exists that this store knows nothing about,
+    /// so a question answered by absence — "does anything still name this
+    /// blob?" — cannot be answered safely.
+    #[must_use]
+    pub fn read_every_record(&self) -> bool {
+        self.unreadable == 0
     }
 
     #[must_use]

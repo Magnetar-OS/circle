@@ -230,6 +230,46 @@ fn one_scan_attached_to_two_people_is_stored_once_and_outlives_one_detach() {
     assert!(!circle::attachments::path(&fixture.root, &stored).exists());
 }
 
+/// The start-up sweep decides what is an orphan from the records it could
+/// read. A record it could not read — torn by a crash mid-write, or edited by
+/// hand — still names its blobs; they just cannot be seen. Sweeping then
+/// deleted the only copy of a file the user attached, permanently, because
+/// the sweep runs before anything could notice the record was bad.
+#[test]
+fn an_unreadable_record_keeps_the_start_up_sweep_from_deleting_blobs() {
+    let fixture = fixture();
+    let home = fixture.card("ada@home");
+
+    let scan = fixture._dir.path().join("contract.pdf");
+    std::fs::write(&scan, b"the signed contract").expect("write the scan");
+    let stored = circle::attachments::store(&fixture.root, &scan).expect("store the blob");
+    let mut crm = CrmStore::open(&fixture.root);
+    crm.attach(&home, stored.clone()).expect("attach");
+
+    // The record naming the blob becomes unreadable.
+    let records: Vec<_> = std::fs::read_dir(fixture.root.join(".crm"))
+        .expect("the CRM directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == "json"))
+        .collect();
+    assert_eq!(records.len(), 1);
+    std::fs::write(&records[0], "{\"notes\": [").expect("tear the record");
+
+    let reopened = CrmStore::open(&fixture.root);
+    let swept = circle::attachments::sweep_orphans(&fixture.root, &reopened);
+    assert_eq!(swept, 0);
+    assert!(
+        circle::attachments::path(&fixture.root, &stored).exists(),
+        "the sweep deleted a blob an unreadable record still names"
+    );
+
+    // Once every record reads again, a genuine orphan is still swept.
+    std::fs::remove_file(&records[0]).expect("remove the torn record");
+    let clean = CrmStore::open(&fixture.root);
+    assert_eq!(circle::attachments::sweep_orphans(&fixture.root, &clean), 1);
+}
+
 /// Attachments are the heaviest thing here, so the promise that nothing
 /// reaches the card matters most for them.
 #[test]
