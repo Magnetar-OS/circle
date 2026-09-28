@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `03d7dcb`).
+
 ### Fixed
 
 - Re-importing a CSV with a mapped Unique ID no longer clears what the file
