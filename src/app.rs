@@ -2779,13 +2779,7 @@ impl AppModel {
                     &contacts_root,
                 );
                 let changed = reports.iter().any(cosmic_pim_sync::AccountReport::changed);
-                (
-                    reports
-                        .iter()
-                        .map(cosmic_pim_sync::AccountReport::summary)
-                        .collect(),
-                    changed,
-                )
+                (reports.iter().map(sync_line).collect(), changed)
             })
             .await
             .unwrap_or_else(|why| (vec![why.to_string()], false));
@@ -3186,6 +3180,23 @@ fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
     }
 }
 
+/// One account's line on the Accounts page after a sync pass.
+///
+/// The substrate's summary counts the collections that were reached, so an
+/// account whose CardDAV side refused us reads "up to date" on the strength
+/// of its calendars. That is the one failure a contacts app exists to show,
+/// and the report carries it separately; it is appended here.
+fn sync_line(report: &cosmic_pim_sync::AccountReport) -> String {
+    let summary = report.summary();
+    match &report.contacts_unavailable {
+        Some(why) => format!(
+            "{summary}; {}",
+            fl!("sync-contacts-unreachable", why = why.clone())
+        ),
+        None => summary,
+    }
+}
+
 /// Whether an `http://` URL points at this machine — the one case where
 /// sending a password unencrypted is acceptable, because it never leaves it.
 fn is_loopback(url: &str) -> bool {
@@ -3384,6 +3395,38 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         let key = ContactKey::of(&c);
         assert_eq!(key.book, "personal");
         assert_eq!(key.uid, "abc");
+    }
+
+    /// An account whose calendars synced but whose address books could not be
+    /// reached. The substrate's summary counts collections only, so it reads
+    /// "up to date" — in the contacts app, about the one account whose
+    /// contacts did not sync at all.
+    #[test]
+    fn an_account_whose_address_books_were_not_reached_says_so() {
+        let report = cosmic_pim_sync::AccountReport {
+            account_id: "acct".to_owned(),
+            display_name: "Fastmail".to_owned(),
+            collections: Ok(Vec::new()),
+            contacts_unavailable: Some("HTTP 401 Unauthorized".to_owned()),
+        };
+        let line = sync_line(&report);
+        assert!(line.starts_with("Fastmail"), "{line}");
+        assert!(
+            line.contains("HTTP 401 Unauthorized"),
+            "the address-book failure is missing from the status line: {line}"
+        );
+    }
+
+    /// The ordinary case adds nothing to the substrate's summary.
+    #[test]
+    fn an_account_whose_address_books_synced_reads_as_the_summary() {
+        let report = cosmic_pim_sync::AccountReport {
+            account_id: "acct".to_owned(),
+            display_name: "Fastmail".to_owned(),
+            collections: Ok(Vec::new()),
+            contacts_unavailable: None,
+        };
+        assert_eq!(sync_line(&report), report.summary());
     }
 
     /// A PNG of the given size, for the photo-processing tests.

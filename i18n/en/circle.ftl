@@ -179,6 +179,7 @@ no-accounts-description =
     shared with Slate — an account added there is already here.
 sync-now = Sync now
 syncing = Syncing…
+sync-contacts-unreachable = address books not reached: { $why }
 sync-interval = Background sync
 sync-interval-description = How often to sync accounts on their own. Sync now always works.
 sync-off = Only when I press Sync

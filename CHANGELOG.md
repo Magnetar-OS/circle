@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows
   or joins the card's, and everything else is left as it was.
 - CSV import and New group honour "New contacts go to"; both used the first
   writable address book whatever the setting said.
+- An account whose address books could not be reached says so on the
+  Accounts page, instead of reading "up to date" because its calendars
+  synced.
 - An unreadable notes record no longer lets the start-up clean-up delete the
   attachments it names; the clean-up waits until every record reads.
 
