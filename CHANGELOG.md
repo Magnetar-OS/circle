@@ -25,6 +25,8 @@ All notable changes to this project are documented here. The format follows
   attachments it names; the clean-up waits until every record reads.
 - Duplicate review names the number two cards actually share, not the first
   number on one of them.
+- The launcher's "Send mail" works for addresses containing spaces or
+  quotes.
 
 ## [1.1.0] - 2026-09-22
 

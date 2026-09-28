@@ -245,7 +245,7 @@ impl Plugin {
                     // Through the desktop's handler, so it reaches whatever the
                     // user's mail app is — Envelope once it registers mailto:.
                     runtime.block_on(cosmic::desktop::spawn_desktop_exec(
-                        format!("xdg-open mailto:{email}"),
+                        compose_exec(email),
                         std::iter::empty::<(&str, &str)>(),
                         None,
                         false,
@@ -303,6 +303,15 @@ fn copy_to_clipboard(value: &str) {
 fn search_exec(label: &str) -> String {
     let quoted = label.replace('\'', "'\\''");
     format!("circle '--search={quoted}'")
+}
+
+/// The command line that starts a mail to `email`.
+///
+/// Quoted the way [`search_exec`] quotes a name, for the same reason: the
+/// address is other people's data on its way into a line shlex splits.
+fn compose_exec(email: &str) -> String {
+    let quoted = email.replace('\'', "'\\''");
+    format!("xdg-open 'mailto:{quoted}'")
 }
 
 /// One search result, in the shape pop-launcher deserialises.
@@ -399,6 +408,29 @@ mod tests {
     fn split(label: &str) -> Vec<String> {
         let exec = search_exec(label);
         shlex::split(&exec).unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"))
+    }
+
+    /// "Send mail" builds an exec line from an address, which is other
+    /// people's data exactly as a name is. It went in unquoted, so an address
+    /// with a space or a quote in it — legal in a quoted local part — split
+    /// into several arguments or failed to parse, and nothing was sent.
+    #[test]
+    fn an_address_is_one_argument_to_the_mail_handler() {
+        for address in [
+            "ada@example.org",
+            "\"ada lovelace\"@example.org",
+            "o'malley@example.ie",
+            "x@y.z /tmp/evil.desktop",
+        ] {
+            let exec = compose_exec(address);
+            let args = shlex::split(&exec)
+                .unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"));
+            assert_eq!(
+                args,
+                ["xdg-open".to_owned(), format!("mailto:{address}")],
+                "{exec}"
+            );
+        }
     }
 
     #[test]
