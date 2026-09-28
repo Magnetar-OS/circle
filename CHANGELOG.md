@@ -27,6 +27,8 @@ All notable changes to this project are documented here. The format follows
   number on one of them.
 - The launcher's "Send mail" works for addresses containing spaces or
   quotes.
+- Email, phone and website rows without a label are labelled in the
+  interface language rather than in English.
 
 ## [1.1.0] - 2026-09-22
 

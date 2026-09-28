@@ -120,7 +120,9 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
         for email in &contact.emails {
             if seen.insert(format!("email:{}", email.value.trim().to_lowercase())) {
                 fields.push(Field {
-                    label: email.label().unwrap_or("email").to_owned(),
+                    label: email
+                        .label()
+                        .map_or_else(|| crate::fl!("email"), ToOwned::to_owned),
                     value: email.value.clone(),
                     action: Some(format!("mailto:{}", email.value)),
                     icon: "mail-send-symbolic",
@@ -138,7 +140,9 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                 .unwrap_or_else(|| phone.value.trim().to_lowercase());
             if seen.insert(format!("phone:{key}")) {
                 fields.push(Field {
-                    label: phone.label().unwrap_or("phone").to_owned(),
+                    label: phone
+                        .label()
+                        .map_or_else(|| crate::fl!("phone"), ToOwned::to_owned),
                     value: phone.value.clone(),
                     // `tel:` is handed to the desktop's handler. Without one
                     // nothing happens, which is why the value stays copyable.
@@ -173,7 +177,9 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
         for url in &contact.urls {
             if seen.insert(format!("url:{}", url.value.trim().to_lowercase())) {
                 fields.push(Field {
-                    label: url.label().unwrap_or("website").to_owned(),
+                    label: url
+                        .label()
+                        .map_or_else(|| crate::fl!("website"), ToOwned::to_owned),
                     value: url.value.clone(),
                     action: Some(url.value.clone()),
                     icon: "web-browser-symbolic",
@@ -313,6 +319,30 @@ mod tests {
             "attributed a value on a contact with only one source"
         );
         assert_eq!(composed.organisation.as_deref(), Some("Analytical Engine"));
+    }
+
+    /// A value with no `TYPE` is labelled by what it is. That label is
+    /// interface text and goes through the catalogue like every other label
+    /// in the pane — the address row already did; email, phone and website
+    /// were English literals in every locale.
+    #[test]
+    fn an_untyped_value_is_labelled_from_the_catalogue() {
+        let mut card = contact("personal", "a", "Ada Lovelace");
+        card.emails.push(typed("ada@example.org"));
+        card.phones.push(typed("+30 210 1234567"));
+        card.urls.push(typed("https://example.org"));
+
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        let labels: Vec<&str> = composed.fields.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                crate::fl!("email"),
+                crate::fl!("phone"),
+                crate::fl!("website")
+            ]
+        );
     }
 
     #[test]
