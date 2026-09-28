@@ -180,6 +180,7 @@ no-accounts-description =
 sync-now = Sync now
 syncing = Syncing…
 sync-contacts-unreachable = address books not reached: { $why }
+sync-needs-attention = Contacts sync needs you: { $accounts }
 sync-interval = Background sync
 sync-interval-description = How often to sync accounts on their own. Sync now always works.
 sync-off = Only when I press Sync

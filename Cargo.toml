@@ -27,6 +27,9 @@ xdgen = "0.1"
 cosmic-pim-core = "1.0.0"
 cosmic-pim-accounts = "1.0.0"
 cosmic-pim-sync = "1.0.0"
+# Which kind of collection a sync report is about (`Flavor`), so a failed
+# calendar is left to Slate; also what the tests read the push queue through.
+cosmic-pim-caldav = "1.0.0"
 
 # --- COSMIC / UI ---
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
@@ -89,9 +92,6 @@ features = [
 ]
 
 [dev-dependencies]
-# The write-path tests read the push queue back to prove a queued save carries
-# its pre-edit base — the queue lives behind caldav's VdirStore.
-cosmic-pim-caldav = "1.0.0"
 # Integration tests write real address books to a scratch directory rather than
 # mocking the store: the thing under test is that bytes survive a round trip
 # through the filesystem, which a mock cannot demonstrate.

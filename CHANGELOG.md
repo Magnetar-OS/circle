@@ -15,6 +15,11 @@ All notable changes to this project are documented here. The format follows
   or — when the two edits touch different fields — merge both. When both
   sides changed the same field, pick a side for each such field and every
   other field keeps both edits.
+- A sync pass that leaves your contacts needing you — an account that failed,
+  address books that refused the sign-in, a conflict to decide — says so in
+  a notification with a button to the Accounts page, instead of only on that
+  page. It is raised when the set of affected accounts changes, so a server
+  that stays down does not interrupt every background sync.
 
 ### Changed
 

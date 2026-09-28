@@ -206,6 +206,10 @@ pub struct AppModel {
     syncing: bool,
     /// The last pass's per-account summaries, shown on the Accounts page.
     sync_status: Option<String>,
+    /// The accounts the last pass flagged for attention. A toast is raised
+    /// only when this set changes, so a server that stays down does not
+    /// interrupt every background pass.
+    sync_attention: Vec<String>,
     /// Cards this device and the server both changed, awaiting a decision —
     /// see [`crate::conflicts`]. Re-read from the sync sidecars at start-up,
     /// after every pass, and after every resolution.
@@ -351,7 +355,9 @@ pub enum Message {
     AccountPasswordChanged(String),
     AccountRemove(String),
     SyncNow,
-    SyncFinished(Vec<String>, bool),
+    SyncFinished(SyncSummary),
+    /// Open the Accounts page — the sync-problem toast's action.
+    ShowAccounts,
     /// Answer the conflict at this index in `conflicts`.
     ConflictResolve(usize, crate::conflicts::Resolution),
     /// (conflict index, disputed-property index, side).
@@ -552,6 +558,7 @@ impl cosmic::Application for AppModel {
             account_form: None,
             syncing: false,
             sync_status: None,
+            sync_attention: Vec::new(),
             conflicts: Vec::new(),
             nav: nav_bar::Model::default(),
             writable_ids: Vec::new(),
@@ -1185,12 +1192,13 @@ impl AppModel {
                     disputes.choose(unit, side);
                 }
             }
-            Message::SyncFinished(lines, changed) => {
+            Message::SyncFinished(summary) => {
                 self.syncing = false;
-                self.sync_status = Some(lines.join("\n"));
+                self.sync_status = Some(summary.lines.join("\n"));
                 // A pass can record new conflicts without changing a card.
                 self.reload_conflicts();
-                if changed {
+                let alert = self.sync_alert(summary.attention);
+                if summary.changed {
                     // Sync wrote `.vcf` files directly; everything read from
                     // them — the list, the nav, the photo cache — is stale.
                     if let Some(store) = self.store.as_mut() {
@@ -1200,6 +1208,11 @@ impl AppModel {
                     self.rebuild_nav();
                     self.reload();
                 }
+                return alert;
+            }
+            Message::ShowAccounts => {
+                self.context_page = ContextPage::Accounts;
+                self.core.window.show_context = true;
             }
 
             Message::NewContact => {
@@ -2779,6 +2792,25 @@ impl AppModel {
         }
     }
 
+    /// The toast for a pass that left something to look at, raised only
+    /// when the set of flagged accounts changed and the Accounts page — where
+    /// the details are — is not already showing.
+    fn sync_alert(&mut self, attention: Vec<String>) -> Task<Message> {
+        let changed = attention != self.sync_attention;
+        self.sync_attention = attention;
+        let page_open = self.core.window.show_context && self.context_page == ContextPage::Accounts;
+        if !changed || page_open || self.sync_attention.is_empty() {
+            return Task::none();
+        }
+        let message = fl!(
+            "sync-needs-attention",
+            accounts = self.sync_attention.join(", ")
+        );
+        self.toasts
+            .push(widget::Toast::new(message).action(fl!("accounts"), |_| Message::ShowAccounts))
+            .map(Into::into)
+    }
+
     /// Re-reads the unresolved conflicts from the sync sidecars.
     fn reload_conflicts(&mut self) {
         self.conflicts = crate::conflicts::load(&self.contacts_root);
@@ -2841,7 +2873,7 @@ impl AppModel {
                 // since the button was pressed.
                 let mut accounts = match cosmic_pim_accounts::AccountStore::open_default() {
                     Ok(accounts) => accounts,
-                    Err(why) => return (vec![why.to_string()], false),
+                    Err(why) => return SyncSummary::failed(why.to_string()),
                 };
                 let reports = cosmic_pim_sync::sync_all(
                     &mut accounts,
@@ -2849,13 +2881,12 @@ impl AppModel {
                     &calendar_root,
                     &contacts_root,
                 );
-                let changed = reports.iter().any(cosmic_pim_sync::AccountReport::changed);
-                (reports.iter().map(sync_line).collect(), changed)
+                SyncSummary::of(&reports)
             })
             .await
-            .unwrap_or_else(|why| (vec![why.to_string()], false));
+            .unwrap_or_else(|why| SyncSummary::failed(why.to_string()));
 
-            Message::SyncFinished(outcome.0, outcome.1)
+            Message::SyncFinished(outcome)
         })
     }
 
@@ -3251,6 +3282,61 @@ fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
     }
 }
 
+/// What a sync pass tells the UI thread.
+#[derive(Clone, Debug)]
+pub struct SyncSummary {
+    /// One line per account, for the Accounts page.
+    pub lines: Vec<String>,
+    /// Whether anything landed on disk.
+    pub changed: bool,
+    /// The accounts whose contacts need a person — see
+    /// [`contacts_need_attention`].
+    pub attention: Vec<String>,
+}
+
+impl SyncSummary {
+    fn of(reports: &[cosmic_pim_sync::AccountReport]) -> Self {
+        Self {
+            lines: reports.iter().map(sync_line).collect(),
+            changed: reports.iter().any(cosmic_pim_sync::AccountReport::changed),
+            attention: reports
+                .iter()
+                .filter(|r| contacts_need_attention(r))
+                .map(|r| r.display_name.clone())
+                .collect(),
+        }
+    }
+
+    /// The pass could not start at all.
+    fn failed(why: String) -> Self {
+        Self {
+            lines: vec![why.clone()],
+            changed: false,
+            attention: vec![why],
+        }
+    }
+}
+
+/// Whether a pass left this account's contacts needing a person: the account
+/// failed outright, its address books refused us, or an address book failed,
+/// holds a conflict, or has edits parked on a password, permission or quota.
+///
+/// Calendars are Slate's to report. Circle syncs them in the same pass, but a
+/// calendar that failed is not something the contacts app should interrupt
+/// anyone about.
+fn contacts_need_attention(report: &cosmic_pim_sync::AccountReport) -> bool {
+    if report.contacts_unavailable.is_some() {
+        return true;
+    }
+    match &report.collections {
+        Err(_) => true,
+        Ok(collections) => collections.iter().any(|c| {
+            c.flavor == cosmic_pim_caldav::Flavor::CardDav
+                && (c.outcome.is_err() || c.needs_attention())
+        }),
+    }
+}
+
 /// One account's line on the Accounts page after a sync pass.
 ///
 /// The substrate's summary counts the collections that were reached, so an
@@ -3498,6 +3584,81 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             contacts_unavailable: None,
         };
         assert_eq!(sync_line(&report), report.summary());
+    }
+
+    fn account(
+        collections: cosmic_pim_sync::Result<Vec<cosmic_pim_sync::CollectionReport>>,
+    ) -> cosmic_pim_sync::AccountReport {
+        cosmic_pim_sync::AccountReport {
+            account_id: "acct".to_owned(),
+            display_name: "Fastmail".to_owned(),
+            collections,
+            contacts_unavailable: None,
+        }
+    }
+
+    fn collection(
+        flavor: cosmic_pim_caldav::Flavor,
+        outcome: cosmic_pim_sync::Result<cosmic_pim_caldav::SyncOutcome>,
+    ) -> cosmic_pim_sync::CollectionReport {
+        cosmic_pim_sync::CollectionReport {
+            collection_id: "c".to_owned(),
+            display_name: "C".to_owned(),
+            href: "/c/".to_owned(),
+            flavor,
+            pushed: cosmic_pim_caldav::push::DrainOutcome::default(),
+            outcome,
+        }
+    }
+
+    fn refused() -> cosmic_pim_sync::Error {
+        cosmic_pim_sync::Error::ForeignSyncOwner {
+            collection: "C".to_owned(),
+            marker: ".vdirsyncer".to_owned(),
+        }
+    }
+
+    /// Sync failures reached nobody unless the Accounts page happened to be
+    /// open (ROADMAP A1: "never silent"). These are the ones that interrupt.
+    #[test]
+    fn a_contacts_failure_or_conflict_needs_attention() {
+        use cosmic_pim_caldav::{Flavor, SyncOutcome};
+
+        assert!(contacts_need_attention(&account(Err(refused()))));
+
+        let failed = account(Ok(vec![collection(Flavor::CardDav, Err(refused()))]));
+        assert!(contacts_need_attention(&failed));
+
+        let conflicted = account(Ok(vec![collection(
+            Flavor::CardDav,
+            Ok(SyncOutcome {
+                conflicts: 1,
+                ..SyncOutcome::default()
+            }),
+        )]));
+        assert!(contacts_need_attention(&conflicted));
+
+        let mut refused_books = account(Ok(Vec::new()));
+        refused_books.contacts_unavailable = Some("HTTP 401".to_owned());
+        assert!(contacts_need_attention(&refused_books));
+    }
+
+    /// A calendar failing is Slate's to report; a clean pass is silent.
+    #[test]
+    fn a_calendar_failure_or_a_clean_pass_does_not() {
+        use cosmic_pim_caldav::{Flavor, SyncOutcome};
+
+        let calendar = account(Ok(vec![collection(Flavor::CalDav, Err(refused()))]));
+        assert!(!contacts_need_attention(&calendar));
+
+        let clean = account(Ok(vec![collection(
+            Flavor::CardDav,
+            Ok(SyncOutcome::default()),
+        )]));
+        assert!(!contacts_need_attention(&clean));
+
+        let summary = SyncSummary::of(&[calendar, clean]);
+        assert!(summary.attention.is_empty());
     }
 
     /// A PNG of the given size, for the photo-processing tests.

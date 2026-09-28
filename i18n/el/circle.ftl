@@ -185,6 +185,7 @@ no-accounts-description =
 sync-now = Συγχρονισμός τώρα
 syncing = Συγχρονισμός…
 sync-contacts-unreachable = τα ευρετήρια δεν ήταν προσβάσιμα: { $why }
+sync-needs-attention = Ο συγχρονισμός επαφών χρειάζεται την προσοχή σας: { $accounts }
 sync-interval = Αυτόματος συγχρονισμός
 sync-interval-description = Πόσο συχνά συγχρονίζονται οι λογαριασμοί μόνοι τους. Ο χειροκίνητος συγχρονισμός λειτουργεί πάντα.
 sync-off = Μόνο όταν πατάω Συγχρονισμός
