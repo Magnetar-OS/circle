@@ -8,20 +8,27 @@
 //! believable. An account is a URL, a username, and a password; discovery
 //! works out the rest, so the user can paste whatever their provider's help
 //! page told them to.
+//!
+//! Sync conflicts are answered here too, laid out as Slate lays out its own:
+//! the page that says "N to resolve" is the one that resolves them.
 
 use cosmic::Element;
 use cosmic::iced::Length;
 use cosmic::widget;
 
 use crate::app::{AccountForm, Message};
+use crate::conflicts::{ConflictRow, Resolution};
 use crate::fl;
+use cosmic_pim_core::merge::{Overlap, Side};
 
-/// One row per account, plus the add form or the button that opens it.
+/// One row per account, plus the add form or the button that opens it, and
+/// any sync conflicts awaiting an answer.
 pub fn view<'a>(
     accounts: &'a [cosmic_pim_accounts::Account],
     form: Option<&'a AccountForm>,
     syncing: bool,
     status: Option<&'a str>,
+    conflicts: &'a [ConflictRow],
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(5).spacing(spacing.space_s);
@@ -81,7 +88,149 @@ pub fn view<'a>(
         );
     }
 
+    if !conflicts.is_empty() {
+        column = column.push(conflicts_section(conflicts));
+    }
+
     column.into()
+}
+
+/// Unresolved sync conflicts: who each side says the card is, and the ways
+/// out. Nothing resolves itself with time — the alternative to asking is
+/// guessing.
+fn conflicts_section(conflicts: &[ConflictRow]) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+    let mut column = widget::column::with_capacity(2 + conflicts.len())
+        .spacing(spacing.space_s)
+        .push(widget::text::heading(fl!("conflicts")))
+        .push(
+            widget::text::caption(fl!("conflicts-description"))
+                .wrapping(cosmic::iced::core::text::Wrapping::Word),
+        );
+    for (index, row) in conflicts.iter().enumerate() {
+        column = column.push(conflict_card(index, row));
+    }
+    column.into()
+}
+
+/// One conflict: the wholesale answers, plus per-property choices when the
+/// sync pass kept the revision both sides started from.
+fn conflict_card(index: usize, row: &ConflictRow) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+
+    let mut section = widget::settings::section().add(
+        widget::settings::item::builder(fl!(
+            "conflict-versions",
+            yours = row.yours.clone(),
+            theirs = row.theirs.clone()
+        ))
+        .description(row.book_name.clone())
+        .control(
+            widget::row::with_capacity(2)
+                .spacing(spacing.space_xxs)
+                .push(
+                    widget::button::text(fl!("conflict-keep-mine"))
+                        .on_press(Message::ConflictResolve(index, Resolution::KeepMine)),
+                )
+                .push(
+                    widget::button::text(fl!("conflict-take-theirs"))
+                        .on_press(Message::ConflictResolve(index, Resolution::TakeTheirs)),
+                ),
+        ),
+    );
+
+    let Some(disputes) = &row.disputes else {
+        return section.into();
+    };
+
+    if disputes.units.is_empty() {
+        // The two edits touch different properties; nothing needs choosing.
+        section = section.add(
+            widget::settings::item::builder(fl!("conflict-merges-cleanly")).control(
+                widget::button::suggested(fl!("conflict-merge-both"))
+                    .on_press(Message::ConflictResolve(index, Resolution::Merge)),
+            ),
+        );
+        return section.into();
+    }
+
+    let mut units = widget::column::with_capacity(disputes.units.len() + 2)
+        .spacing(spacing.space_xs)
+        .push(
+            widget::text::caption(fl!("conflict-choose-description"))
+                .wrapping(cosmic::iced::core::text::Wrapping::Word),
+        );
+    for (unit_index, overlap) in disputes.units.iter().enumerate() {
+        units = units.push(dispute_unit(
+            index,
+            unit_index,
+            overlap,
+            disputes.choices.get(&overlap.unit).copied(),
+        ));
+    }
+    let apply = widget::button::suggested(fl!("conflict-apply-merge"));
+    units = units.push(if disputes.decided() {
+        apply.on_press(Message::ConflictResolve(index, Resolution::Merge))
+    } else {
+        apply
+    });
+
+    section.add(units).into()
+}
+
+/// One disputed property: its name, what it said before either edit, and the
+/// two versions to pick between — the chosen one drawn as the suggested
+/// button.
+fn dispute_unit(
+    row: usize,
+    unit: usize,
+    overlap: &Overlap,
+    chosen: Option<Side>,
+) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
+
+    let side_button = |label: String, lines: Option<&Vec<String>>, side: Side| {
+        let text = lines.map_or_else(|| fl!("conflict-absent"), |l| l.join("\n"));
+        let body = widget::column::with_capacity(2)
+            .spacing(spacing.space_xxxs)
+            .push(widget::text::caption_heading(label))
+            .push(widget::text::caption(text).wrapping(cosmic::iced::core::text::Wrapping::Word));
+        widget::button::custom(body)
+            .class(if chosen == Some(side) {
+                cosmic::theme::Button::Suggested
+            } else {
+                cosmic::theme::Button::Standard
+            })
+            .padding(spacing.space_xxs)
+            .width(Length::Fill)
+            .on_press(Message::ConflictChoose(row, unit, side))
+    };
+
+    let mut column = widget::column::with_capacity(3)
+        .spacing(spacing.space_xxxs)
+        .push(widget::text::caption_heading(overlap.unit.clone()));
+    if let Some(base) = &overlap.base {
+        column = column.push(
+            widget::text::caption(fl!("conflict-was", lines = base.join(" ")))
+                .wrapping(cosmic::iced::core::text::Wrapping::Word),
+        );
+    }
+    column
+        .push(
+            widget::row::with_capacity(2)
+                .spacing(spacing.space_xxs)
+                .push(side_button(
+                    fl!("conflict-mine"),
+                    overlap.local.as_ref(),
+                    Side::Local,
+                ))
+                .push(side_button(
+                    fl!("conflict-theirs-label"),
+                    overlap.remote.as_ref(),
+                    Side::Remote,
+                )),
+        )
+        .into()
 }
 
 fn add_form(form: &AccountForm) -> Element<'_, Message> {

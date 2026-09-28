@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Sync conflicts can be resolved.** A contact changed both here and on the
+  server used to stay parked, its edit never uploaded, with nothing but
+  "1 to resolve" on the Accounts page to show for it. The Accounts page now
+  lists each one with both versions' names: keep yours, take the server's,
+  or — when the two edits touch different fields — merge both. When both
+  sides changed the same field, pick a side for each such field and every
+  other field keeps both edits.
+
 ### Changed
 
 - Rebuilt against the current COSMIC libraries (libcosmic `03d7dcb`).

@@ -191,6 +191,23 @@ error-no-account-store = Account storage is unavailable, so accounts cannot be s
 error-url-scheme = The server address must start with https://
 error-url-insecure = Refusing to send your password over an unencrypted connection. Use https://
 
+## Sync conflicts
+
+conflicts = Conflicts
+conflicts-description = These contacts changed both here and on the server. Pick which version to keep — nothing resolves itself with time.
+conflict-versions = Yours: { $yours } · Server's: { $theirs }
+conflict-keep-mine = Keep mine
+conflict-take-theirs = Take server's
+conflict-merges-cleanly = Your edit and the server's touch different fields
+conflict-merge-both = Merge both
+conflict-choose-description = Both sides changed the fields below. Pick which version of each to keep; every other field keeps both edits.
+conflict-was = Was: { $lines }
+conflict-mine = Mine
+conflict-theirs-label = Server's
+conflict-absent = (removed)
+conflict-apply-merge = Apply choices
+conflict-merge-failed = The merged version could not be built — pick a whole side instead.
+
 ## Selection and bulk actions
 
 select = Select

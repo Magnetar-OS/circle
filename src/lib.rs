@@ -11,6 +11,7 @@
 pub mod app;
 pub mod attachments;
 pub mod config;
+pub mod conflicts;
 pub mod crm;
 pub mod dedupe;
 pub mod i18n;

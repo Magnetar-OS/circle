@@ -206,6 +206,10 @@ pub struct AppModel {
     syncing: bool,
     /// The last pass's per-account summaries, shown on the Accounts page.
     sync_status: Option<String>,
+    /// Cards this device and the server both changed, awaiting a decision —
+    /// see [`crate::conflicts`]. Re-read from the sync sidecars at start-up,
+    /// after every pass, and after every resolution.
+    conflicts: Vec<crate::conflicts::ConflictRow>,
     nav: nav_bar::Model,
     /// Writable books, cached as parallel id/name vectors.
     ///
@@ -348,6 +352,10 @@ pub enum Message {
     AccountRemove(String),
     SyncNow,
     SyncFinished(Vec<String>, bool),
+    /// Answer the conflict at this index in `conflicts`.
+    ConflictResolve(usize, crate::conflicts::Resolution),
+    /// (conflict index, disputed-property index, side).
+    ConflictChoose(usize, usize, cosmic_pim_core::merge::Side),
 
     NewContact,
     EditContact,
@@ -544,6 +552,7 @@ impl cosmic::Application for AppModel {
             account_form: None,
             syncing: false,
             sync_status: None,
+            conflicts: Vec::new(),
             nav: nav_bar::Model::default(),
             writable_ids: Vec::new(),
             writable_names: Vec::new(),
@@ -574,6 +583,7 @@ impl cosmic::Application for AppModel {
         }
         model.rebuild_nav();
         model.reload();
+        model.reload_conflicts();
 
         // Start-up requests from the command line: `.vcf` paths to import, and
         // the desktop entry's "New Contact" action.
@@ -760,6 +770,7 @@ impl cosmic::Application for AppModel {
                     self.account_form.as_ref(),
                     self.syncing,
                     self.sync_status.as_deref(),
+                    &self.conflicts,
                 ),
                 Message::ToggleContextPage(ContextPage::Accounts),
             )
@@ -1164,9 +1175,21 @@ impl AppModel {
                 }
             }
             Message::SyncNow => return self.sync_now(),
+            Message::ConflictResolve(index, how) => return self.resolve_conflict(index, how),
+            Message::ConflictChoose(row, unit, side) => {
+                if let Some(disputes) = self
+                    .conflicts
+                    .get_mut(row)
+                    .and_then(|row| row.disputes.as_mut())
+                {
+                    disputes.choose(unit, side);
+                }
+            }
             Message::SyncFinished(lines, changed) => {
                 self.syncing = false;
                 self.sync_status = Some(lines.join("\n"));
+                // A pass can record new conflicts without changing a card.
+                self.reload_conflicts();
                 if changed {
                     // Sync wrote `.vcf` files directly; everything read from
                     // them — the list, the nav, the photo cache — is stale.
@@ -2753,6 +2776,39 @@ impl AppModel {
                 self.with_account_form(|f| f.error = Some(why.to_string()));
                 Task::none()
             }
+        }
+    }
+
+    /// Re-reads the unresolved conflicts from the sync sidecars.
+    fn reload_conflicts(&mut self) {
+        self.conflicts = crate::conflicts::load(&self.contacts_root);
+    }
+
+    /// Applies the user's answer to one conflict, then re-reads everything
+    /// the resolution may have rewritten.
+    fn resolve_conflict(
+        &mut self,
+        index: usize,
+        how: crate::conflicts::Resolution,
+    ) -> Task<Message> {
+        let Some(row) = self.conflicts.get(index) else {
+            return Task::none();
+        };
+        match crate::conflicts::resolve(&self.contacts_root, row, how) {
+            Ok(()) => {
+                if let Some(store) = self.store.as_mut() {
+                    store.refresh();
+                }
+                self.photos.clear();
+                self.rebuild_nav();
+                self.reload();
+                self.reload_conflicts();
+                Task::none()
+            }
+            Err(crate::conflicts::ResolveError::MergeFailed) => {
+                self.toast(fl!("conflict-merge-failed"))
+            }
+            Err(crate::conflicts::ResolveError::Write(why)) => self.toast(why),
         }
     }
 
