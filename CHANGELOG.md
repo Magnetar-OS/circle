@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
   wholesale, so a CSV with a name and a UID erased the card's emails, numbers,
   addresses and name parts. A row now only adds: a value it carries replaces
   or joins the card's, and everything else is left as it was.
+- CSV import and New group honour "New contacts go to"; both used the first
+  writable address book whatever the setting said.
 - An unreadable notes record no longer lets the start-up clean-up delete the
   attachments it names; the clean-up waits until every record reads.
 

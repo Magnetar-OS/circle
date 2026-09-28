@@ -53,6 +53,22 @@ impl Config {
         self.hidden_books.iter().any(|b| b == book_id)
     }
 
+    /// The book a new card is written to: [`Self::default_book`] while it
+    /// exists and is writable, else the first writable book, else none.
+    ///
+    /// One answer for every way a card is made — the editor, a `.vcf` or CSV
+    /// import, a new group — because the setting reads "New contacts go to",
+    /// and a path that asked the store instead filed its cards somewhere the
+    /// user had not chosen.
+    #[must_use]
+    pub fn new_card_book(&self, books: &[cosmic_pim_core::model::CalendarMeta]) -> Option<String> {
+        self.default_book
+            .as_deref()
+            .filter(|id| books.iter().any(|b| b.id == *id && !b.read_only))
+            .map(ToOwned::to_owned)
+            .or_else(|| books.iter().find(|b| !b.read_only).map(|b| b.id.clone()))
+    }
+
     pub fn toggle_book(&mut self, book_id: &str) {
         if let Some(pos) = self.hidden_books.iter().position(|b| b == book_id) {
             self.hidden_books.remove(pos);
@@ -77,6 +93,50 @@ mod tests {
         config.toggle_book("work");
         assert!(!config.is_hidden("work"));
         assert!(config.hidden_books.is_empty());
+    }
+
+    fn book(id: &str, read_only: bool) -> cosmic_pim_core::model::CalendarMeta {
+        cosmic_pim_core::model::CalendarMeta {
+            id: id.to_owned(),
+            name: id.to_owned(),
+            color: cosmic_pim_core::model::Rgb(0, 0, 0),
+            path: std::path::PathBuf::from(id),
+            read_only,
+        }
+    }
+
+    /// "New contacts go to" is one setting, and every way of making a card —
+    /// the editor, a `.vcf` import, a CSV import, a new group — reads it.
+    /// CSV import and group creation used the first writable book instead.
+    #[test]
+    fn the_chosen_default_book_receives_new_cards() {
+        let books = [book("personal", false), book("work", false)];
+        let config = Config {
+            default_book: Some("work".to_owned()),
+            ..Config::default()
+        };
+        assert_eq!(config.new_card_book(&books).as_deref(), Some("work"));
+    }
+
+    /// A default that has since become read-only, or no longer exists, falls
+    /// back to the first writable book rather than to nothing.
+    #[test]
+    fn an_unwritable_or_missing_default_falls_back_to_the_first_writable_book() {
+        let books = [book("shared", true), book("personal", false)];
+        let stale = Config {
+            default_book: Some("shared".to_owned()),
+            ..Config::default()
+        };
+        assert_eq!(stale.new_card_book(&books).as_deref(), Some("personal"));
+        let gone = Config {
+            default_book: Some("deleted".to_owned()),
+            ..Config::default()
+        };
+        assert_eq!(gone.new_card_book(&books).as_deref(), Some("personal"));
+        assert_eq!(
+            Config::default().new_card_book(&[book("shared", true)]),
+            None
+        );
     }
 
     #[test]

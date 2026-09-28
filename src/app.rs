@@ -1191,15 +1191,7 @@ impl AppModel {
                     return Task::none();
                 };
                 let books: Vec<CalendarMeta> = store.books().to_vec();
-                let target = self
-                    .config
-                    .default_book
-                    .as_deref()
-                    .filter(|id| books.iter().any(|b| b.id == *id && !b.read_only))
-                    .map(ToOwned::to_owned)
-                    .or_else(|| store.default_book().map(|b| b.id.clone()));
-
-                match target {
+                match self.config.new_card_book(&books) {
                     Some(book) => {
                         let groups = self.group_rows(&book, None);
                         self.editor =
@@ -1813,7 +1805,7 @@ impl AppModel {
                 let Some(store) = self.store.as_mut() else {
                     return Task::none();
                 };
-                let Some(book) = store.default_book().map(|b| b.id.clone()) else {
+                let Some(book) = self.config.new_card_book(store.books()) else {
                     return self.toast(fl!("error-no-writable-book"));
                 };
                 match store.create_group(name.trim(), &book, version) {
@@ -2583,21 +2575,9 @@ impl AppModel {
     /// re-importing updates rather than duplicates.
     fn import(&mut self, path: &std::path::Path) -> Task<Message> {
         let Some(book_id) = self
-            .config
-            .default_book
-            .clone()
-            .filter(|id| {
-                self.store
-                    .as_ref()
-                    .and_then(|s| s.book(id))
-                    .is_some_and(|b| !b.read_only)
-            })
-            .or_else(|| {
-                self.store
-                    .as_ref()
-                    .and_then(|s| s.default_book())
-                    .map(|b| b.id.clone())
-            })
+            .store
+            .as_ref()
+            .and_then(|s| self.config.new_card_book(s.books()))
         else {
             return self.toast(fl!("error-no-writable-book"));
         };
@@ -2828,8 +2808,7 @@ impl AppModel {
         let Some(book_id) = self
             .store
             .as_ref()
-            .and_then(|s| s.default_book())
-            .map(|b| b.id.clone())
+            .and_then(|s| self.config.new_card_book(s.books()))
         else {
             return self.toast(fl!("error-no-writable-book"));
         };
