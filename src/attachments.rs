@@ -272,6 +272,20 @@ mod tests {
         );
     }
 
+    /// The digest is a blob's name, so it must never change under a
+    /// dependency upgrade: records written before would stop finding their
+    /// files. Pinned to the FIPS 180-2 test vector for "abc".
+    #[test]
+    fn a_blob_is_named_by_its_standard_sha256() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("contacts");
+        let attachment = store(&root, &source(dir.path(), "abc", b"abc")).unwrap();
+        assert_eq!(
+            attachment.blob,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
     #[test]
     fn different_bytes_are_different_blobs() {
         let dir = tempfile::tempdir().unwrap();

@@ -62,7 +62,7 @@ strsim = "0.11"
 qrcode = { version = "0.14", default-features = false }
 # Content-addressing for attachments: the digest is a blob's identity, so two
 # copies of the same scan are stored once. Already in the graph.
-sha2 = "0.10"
+sha2 = "0.11"
 # KDE Connect handoff: asking the daemon which phone is reachable, and handing
 # it a number to dial or text. Already in the tree through libcosmic, and used
 # directly here for the same reason Slate does — the alternative is shelling
