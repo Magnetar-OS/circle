@@ -148,6 +148,7 @@ export = Export…
 import-empty = Nothing in { $path } could be read as a contact.
 import-done = Imported { $added } new, updated { $updated }.
 export-done = Saved { $path }.
+error-nothing-to-export = No address book is shown, so there is nothing to export. Hidden books can be shown again in Settings.
 error-remote-file = That location is not a local file.
 
 ## CSV import

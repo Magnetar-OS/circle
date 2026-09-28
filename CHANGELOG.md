@@ -67,6 +67,8 @@ All notable changes to this project are documented here. The format follows
   always English; the standard labels and the month names now come from the
   translation, and a label only the card's own app knows is shown as
   written. The editor's label menu is translated too.
+- Exporting with every address book hidden says so, instead of claiming
+  there is no address book that can be written to.
 - An attachment whose stored copy was cut short by a crash is repaired the
   next time the same file is attached, and attachments are now stored
   crash-safely.

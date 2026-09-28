@@ -1398,7 +1398,10 @@ impl AppModel {
                     }
                 };
                 if ids.is_empty() {
-                    return self.toast(fl!("error-no-writable-book"));
+                    // No book exists or every one is hidden: exporting needs
+                    // no write access, so the old "no writable book" was
+                    // wrong about why.
+                    return self.toast(fl!("error-nothing-to-export"));
                 }
 
                 return cosmic::task::future(async move {
