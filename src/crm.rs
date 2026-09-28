@@ -319,10 +319,13 @@ impl CrmStore {
                 Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(why) => Err(why.to_string()),
             },
+            // Crash-safe: a torn record is skipped on reload, and with it the
+            // notes and the attachment references it held.
             Some(record) => {
-                std::fs::create_dir_all(&self.dir).map_err(|why| why.to_string())?;
                 let text = serde_json::to_string_pretty(record).map_err(|why| why.to_string())?;
-                std::fs::write(&path, text).map_err(|why| why.to_string())
+                cosmic_pim_core::atomic::write(&path, &text, None)
+                    .map(|_| ())
+                    .map_err(|why| format!("{}: {why}", path.display()))
             }
         }
     }

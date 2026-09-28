@@ -33,6 +33,11 @@ All notable changes to this project are documented here. The format follows
   quotes.
 - Email, phone and website rows without a label are labelled in the
   interface language rather than in English.
+- Notes, links and their records are written crash-safely. A crash or a full
+  disk mid-save could leave a torn record that the next launch skipped,
+  hiding its notes or unlinking its cards. Linking two linked people now
+  writes the merged record before removing the old ones, and a record that
+  cannot be removed is reported instead of ignored.
 
 ## [1.1.0] - 2026-09-22
 

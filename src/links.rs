@@ -149,16 +149,18 @@ impl LinkStore {
             cards: merged,
         };
 
-        for old in &absorbed_ids {
-            if *old != id {
-                let _ = std::fs::remove_file(self.path_for(old));
-            }
-        }
+        // The merged record is made durable before any absorbed one goes:
+        // a failure in between leaves a card in two records, which the next
+        // merge absorbs again, rather than in none.
         self.write_person(&person)?;
+        let removed = absorbed_ids
+            .iter()
+            .filter(|old| **old != id)
+            .try_for_each(|old| self.remove_record(old));
         self.persons.retain(|p| !absorbed_ids.contains(&p.id));
         self.persons.push(person);
         self.persons.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(())
+        removed
     }
 
     /// Takes one card out of its person. A person left with one card is
@@ -176,7 +178,7 @@ impl LinkStore {
         person.cards.retain(|c| !(c.book == book && c.uid == uid));
 
         if person.cards.len() < 2 {
-            let _ = std::fs::remove_file(self.path_for(&person.id));
+            self.remove_record(&person.id)?;
             self.persons.remove(index);
         } else {
             self.write_person(&person)?;
@@ -212,9 +214,22 @@ impl LinkStore {
         self.write_file(&self.path_for(&person.id), &text)
     }
 
+    /// Crash-safe: a torn record would be skipped on reload, silently
+    /// unlinking its cards.
     fn write_file(&self, path: &Path, text: &str) -> Result<(), String> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        std::fs::write(path, text).map_err(|e| e.to_string())
+        cosmic_pim_core::atomic::write(path, text, None)
+            .map(|_| ())
+            .map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// Removes a person's record; one that is already gone is not an error.
+    fn remove_record(&self, id: &str) -> Result<(), String> {
+        let path = self.path_for(id);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(why) => Err(format!("{}: {why}", path.display())),
+        }
     }
 }
 
@@ -289,6 +304,88 @@ mod tests {
         assert!(links.persons().is_empty());
         let reopened = LinkStore::open(dir.path());
         assert!(reopened.persons().is_empty());
+    }
+
+    /// Merging two persons rewrites the first record and removes the second.
+    /// When the rewrite fails, the second must still be on disk: removing it
+    /// first left its cards unlinked with nothing to show for it.
+    #[test]
+    fn a_failed_merge_leaves_the_absorbed_record_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![card("personal", "a"), card("work", "b")])
+            .unwrap();
+        links
+            .link(vec![card("shared", "c"), card("other", "d")])
+            .unwrap();
+        let first = links.person_of("personal", "a").unwrap().id.clone();
+        let second = links.person_of("shared", "c").unwrap().id.clone();
+
+        // The merged record cannot be written: its path is now a directory
+        // with something in it, which neither a write nor a rename replaces.
+        let merged_path = links.path_for(&first);
+        std::fs::remove_file(&merged_path).unwrap();
+        std::fs::create_dir(&merged_path).unwrap();
+        std::fs::write(merged_path.join("keep"), b"").unwrap();
+
+        assert!(
+            links
+                .link(vec![card("personal", "a"), card("shared", "c")])
+                .is_err()
+        );
+        assert!(
+            links.path_for(&second).exists(),
+            "the absorbed record was removed before the merged one was written"
+        );
+        assert_eq!(links.persons().len(), 2, "memory moved ahead of the disk");
+    }
+
+    /// A record that could not be removed would link its cards again on the
+    /// next reload, so the failure has to reach the caller.
+    #[test]
+    fn a_record_that_cannot_be_removed_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![card("personal", "a"), card("work", "b")])
+            .unwrap();
+        links
+            .link(vec![card("shared", "c"), card("other", "d")])
+            .unwrap();
+        let second = links.person_of("shared", "c").unwrap().id.clone();
+
+        let stuck = links.path_for(&second);
+        std::fs::remove_file(&stuck).unwrap();
+        std::fs::create_dir(&stuck).unwrap();
+        std::fs::write(stuck.join("keep"), b"").unwrap();
+
+        assert!(
+            links
+                .link(vec![card("personal", "a"), card("shared", "c")])
+                .is_err(),
+            "a failed removal of an absorbed record was swallowed"
+        );
+    }
+
+    /// The same rule for unlinking: dissolving a person whose record cannot
+    /// be removed is not a success.
+    #[test]
+    fn dissolving_a_person_whose_record_cannot_be_removed_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![card("personal", "a"), card("work", "b")])
+            .unwrap();
+        let id = links.person_of("personal", "a").unwrap().id.clone();
+
+        let stuck = links.path_for(&id);
+        std::fs::remove_file(&stuck).unwrap();
+        std::fs::create_dir(&stuck).unwrap();
+        std::fs::write(stuck.join("keep"), b"").unwrap();
+
+        assert!(links.unlink("work", "b").is_err());
+        assert_eq!(links.persons().len(), 1, "memory moved ahead of the disk");
     }
 
     #[test]
