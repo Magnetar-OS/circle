@@ -4,14 +4,24 @@ Per the roadmap's benchmark table: **baseline** GNOME Contacts (must fully
 cover), **ceiling** GNOME Contacts + Monica's CRM layer, **polish reference**
 Apple Contacts (how it should feel, not what it does — excluded from this
 audit). Method: GNOME Contacts' surface from apps.gnome.org, the GNOME help
-pages, and release notes through GNOME 50 (Contacts 50.0, March 2026);
+pages, and release notes through GNOME 51 (Contacts 51.0, 13 September
+2026);
 Monica's from monicahq.com (v2 shipped features; v3's custom-records design
 noted where relevant). Circle's side from README.md, 03-circle.md, and the
 source where a row was uncertain. Status values: **have** / **partial** /
 **gap** / **rejected** (with the reason from 03-circle.md's non-goals) /
 **verify** where honesty requires checking rather than guessing.
 
-Audited 2026-08-27.
+Audited 2026-08-27; re-audited 2026-09-29 against the code at that date
+and against GNOME Contacts 51.0. Every **have** below was checked in the
+source, not in the docs.
+
+**What 51.0 changed.** Read from the 50.0…51.0 comparison on
+gitlab.gnome.org (the release has no NEWS body): contact photos persist in
+the Flatpak build after a restart, import errors are announced to screen
+readers, and translations. No feature was added or removed, so the baseline
+rows are unchanged; the import-error announcement is recorded under
+accessibility.
 
 ## Baseline: GNOME Contacts
 
@@ -27,7 +37,7 @@ Audited 2026-08-27.
 | Favorites pinned to top of list | gap | GNOME Contacts marks favorites; Circle has no equivalent (the star in the editor is the PREF toggle, a different thing). |
 | mailto:/tel: actions from the detail pane | have | Through the desktop handler; KDE Connect picks up `tel:` when installed. Direct D-Bus handoff open (03 §3). |
 | Address opens in a maps app | verify | GNOME's behaviour and Circle's both unchecked; Circle shows the address as text. |
-| Share contact as QR code | gap | GNOME 44+. Nothing in Circle. |
+| Share contact as QR code | have | `ui/share.rs`: a trimmed card (no photo) fitted to one code, SVG rendered in the app. |
 
 ### Editing
 
@@ -66,10 +76,10 @@ counts against the ceiling.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Link contacts across accounts/sources | gap | GNOME's headline aggregation feature. Circle's design (03 §5) is stronger — app-level person, per-field precedence, every edit landing on exactly one card, link store in a local-only collection — but none of it is built. The largest baseline gap. |
-| Unlink | gap | Follows the above. |
-| Automatic linking of matching contacts | gap | GNOME auto-links same-name contacts across sources. Circle plans candidate *suggestion* only. |
-| Duplicate review (candidates, side-by-side diff) | gap | Planned (03 §6): exact email / E.164 phone, transliteration-aware names; default action link. |
+| Link contacts across accounts/sources | have | `links.rs`: a person is a JSON record under `.links/`; cards are never rewritten; the list folds a person into one row and the detail pane unions their values with per-value book attribution. The launcher folds them too. |
+| Unlink | have | Lossless; a person left with one card dissolves. Pinned by `tests/linking.rs`. |
+| Automatic linking of matching contacts | rejected | GNOME auto-links same-name contacts. Circle suggests (duplicate review) and never links on its own: a wrong automatic link silently mixes two people's values in every view. |
+| Duplicate review (candidates, side-by-side diff) | have | `dedupe.rs`: shared email, shared number by significant trailing digits (no invented country code), transliteration-aware name similarity; link or "not the same person", remembered. |
 | Automatic merging | rejected | Non-goal: no auto-merge, ever. Destructive merge will exist only as a separate, explicit, undoable operation. |
 
 ### Import and export
@@ -87,52 +97,53 @@ counts against the ceiling.
 |---|---|---|
 | Local address book | have | Plain vdir; khard/vdirsyncer-compatible. |
 | CardDAV accounts (URL, username, password) | have | Suite-shared accounts.toml, password in the keychain; on-demand or background cadence sync (off by default); unbound books stay local. |
-| Google contacts via OAuth | verify | GNOME gets this through GNOME Online Accounts. Circle's account flow is URL/user/password; whether Google's CardDAV endpoint works with an app password, and whether OAuth is planned in the substrate, needs checking. |
+| Google contacts via OAuth | partial | The substrate syncs OAuth accounts (provider manifests, `cosmic_pim_accounts::Registry`) and Circle syncs every account in the shared store, but Circle's own add form asks only for URL, user and password; an OAuth account has to be added elsewhere in the suite first. |
 | Exchange / EWS contacts | gap | GNOME has it via GOA + EDS. Not in the substrate. |
 | External changes noticed live | have | vdirsyncer, khard, or a text editor changing a card updates the list without a restart. |
-| Sync conflict resolution UI | gap | Depends on the substrate's Milestone-1 conflict surfacing API; neither app can build it earlier. See data-loss section. |
+| Sync conflict resolution UI | have | Accounts page, over `cosmic_pim_sync::conflict`: keep mine, take the server's, merge when the edits touch different fields, or pick a side per disputed field. A pass that leaves one raises a notification. |
+| Sync failures visible | have | Per-account status line (including address books that refused the sign-in), and a notification when the set of accounts needing attention changes. |
 
 ### Search
 
 | Feature | Status | Notes |
 |---|---|---|
 | Search names, emails, orgs, nicknames, categories, phones | have | Punctuation-insensitive (`5551234` matches `+1 (555) 123-4`); exceeds GNOME's substring search. |
-| Search from outside the app | have | Launcher plugin: `con ada`, Enter opens filtered, context menu copies email/phone or composes — GNOME has Shell search provider parity here. |
+| Search from outside the app | have | Launcher plugin: `con ada`, Enter opens filtered, context menu copies email/phone or composes, one result per linked person — GNOME has Shell search provider parity here. |
 
 ### Accessibility and keyboard
 
 | Feature | Status | Notes |
 |---|---|---|
-| Keyboard shortcuts via KeyBind table | have | Ctrl+N/E/A/F/I/R, Ctrl+Shift+E, Ctrl+, (src/key_bind.rs). |
+| Keyboard shortcuts via KeyBind table | have | Ctrl+N/E/A/F/I/R, Ctrl+Shift+E, Ctrl+Shift+R (sync), Ctrl+, and Delete (src/key_bind.rs); arrows walk the list. |
 | Every action keyboard-reachable | partial | Milestone-5 exit criterion; not audited yet. |
 | Shortcut cheat-sheet / palette | gap | The Envelope registry pattern is slated to extend here (roadmap M5). |
-| Screen reader, contrast, 125/150% text scaling, reduced motion | verify | Milestone-5 items; current state unmeasured. |
-| i18n (Fluent, translated desktop entry/metainfo) | have | Generated at build time from the catalogues; Greek is the proving second locale. |
+| Screen reader, contrast, 125/150% text scaling, reduced motion | verify | Milestone-5 items; current state unmeasured. GNOME 51.0 announces import errors to screen readers; Circle reports them in a toast, whose announcement has not been checked. |
+| i18n (Fluent, translated desktop entry/metainfo) | have | Generated at build time from the catalogues; Greek is the proving second locale. vCard TYPE labels and birthday months are translated; a label the catalogue does not know is shown as written. |
 
 ## Ceiling: Monica's CRM layer
 
-All of this sits behind linking (03 §5) — CRM data attaches to a *person*,
-not a card — and lives in the local-only collection so synced books others
-see stay unpolluted.
+CRM data is keyed per card and unioned across a linked person, and lives in
+`.crm/` beside the books — a dot-directory the collection scanner skips — so
+synced books others see stay unpolluted.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Timestamped notes per person | gap | Planned (03 §7): plain files in the local-only collection, greppable. |
-| Activity log ("log interaction") | gap | Planned as manual last-contacted first. |
+| Timestamped notes per person | have | `crm.rs`: JSON per card, written atomically; unioned across a linked person. |
+| Activity log ("log interaction") | have | Manual "log contact" with a timestamp; the latest one is the last-contacted date. |
 | Automatic last-contacted from mail | gap | Waits on Envelope's sent/received hook (library call, no daemon). |
-| Stay-in-touch cadence + overdue list | gap | Planned; reuses Slate's reminder machinery once it moves to the substrate — no second scheduler. |
-| Birthday reminders | gap | Via substrate BDAY synthesis feeding Slate (roadmap M1); not landed. |
-| Relationships between people | gap | Planned as vCard4 RELATED, clickable, text fallback for 3.0 cards. Monica's family/partner/coworker typing would ride on RELATED's type parameter. |
-| Documents and photos per person | gap | Planned: local content-addressed blob dir, explicitly local-only in the UI. |
+| Stay-in-touch cadence + overdue list | have | Per-card cadence and a "Keep in touch" sidebar list of who is overdue. No desktop notification: that would be a second scheduler beside Slate's. |
+| Birthday reminders | have | In Slate: `cosmic_pim_core::birthdays` synthesises a birthdays calendar from the suite's address books. |
+| Relationships between people | partial | `relations.rs` reads vCard 4.0 `RELATED` and Apple's `X-ABRELATEDNAMES`, links the ones that name somebody in the book; read-only — writing needs a substrate patcher for either property. |
+| Documents and photos per person | have | `attachments.rs`: content-addressed blobs under `.crm/blobs/`, stored atomically, swept only when every record reads. |
 | Syncing those attachments | rejected | Non-goal: attachment sync. |
 | Business-card OCR | gap | Explicitly last, behind an optional feature flag. |
 | Labels/tags | have | CATEGORIES covers Monica's labels. |
-| Journal (free-standing, not per-contact) | gap | Not in 03's plan. Arguably out of scope for a contacts app; needs an explicit have/reject decision so it stops being a hole. |
-| Gifts tracking | gap | Not planned. Same: decide, don't leave unlisted. |
-| Debts tracking | gap | Not planned. Same. |
-| Tasks per contact | gap | Not planned in Circle; the suite's task owner is Slate — a RELATED-style link from person to task may be the right shape. Decide. |
-| Calls / conversations log | gap | Not planned as distinct types; the planned interaction log may subsume both. Decide and record. |
-| Life events | gap | Not planned. Decide. |
+| Journal (free-standing, not per-contact) | rejected | Out of scope for an address book (audit 2026-09-28 R-4). |
+| Gifts tracking | rejected | Same. |
+| Debts tracking | rejected | Same. |
+| Tasks per contact | gap | Undecided: the suite's task owner is Slate, and a link from person to task may be the right shape. Put to the user in the 2026-09-29 fix-run notes. |
+| Calls / conversations log | partial | The interaction log records that you were in touch and when; it has no call/conversation type or content. |
+| Life events | rejected | Out of scope for an address book (audit 2026-09-28 R-4). |
 | API / programmatic access | have | Differently: files-as-truth. Every contact is a plain `.vcf` on disk, every CRM record a plain file — scriptable without an API server. Monica v3's MCP server has no equivalent; record as a rejection if that stands. |
 | Custom fields / records-you-design (Monica v3) | partial | X- properties survive by construction and are listed honestly, but there is no UI to define or edit custom fields. |
 | Social feeds / profile scraping | rejected | Non-goal: social scraping. |
@@ -142,45 +153,35 @@ see stay unpolluted.
 
 ## Data-loss-shaped gaps
 
-The write path is clean by construction — patches in the card's own dialect,
-verbatim export, UID-keyed re-import, byte-identical undo on delete. Two
-places still need an honest answer before the Milestone-2 exit can be
-claimed:
+The write path patches cards in their own dialect, exports verbatim,
+re-imports by UID and undoes deletes byte for byte. The two questions this
+section used to leave open are answered:
 
-1. **Concurrent remote edits before the conflict API exists.** The substrate's
-   conflict surfacing (local/remote/base, per-property resolution) is a
-   Milestone-1 item. Until it lands, verify what the sync engine does today
-   when a card changed both locally and remotely between syncs — if either
-   side's bytes can be overwritten without surfacing, that is a data-loss
-   gap now, not a missing feature later.
-2. **CSV re-import over an existing contact.** A mapped UID updates through
-   the patcher; verify the semantics when a mapped column is empty for a row,
-   or when the CSV's value for an unmapped-but-modeled field differs — an
-   update must never clear fields the CSV does not carry.
+1. **Concurrent remote edits.** The substrate records a conflict instead of
+   overwriting either side, merges automatically when the two edits touch
+   different properties and a base was queued (Circle queues one with every
+   edit), and parks the rest. Circle shows and resolves them (see Sync
+   conflict resolution above).
+2. **CSV re-import over an existing contact.** This was a real defect: the
+   row replaced the card's modelled fields, so a CSV of name and UID erased
+   emails, numbers and addresses and queued that for upload. Fixed on
+   2026-09-29: a row now only adds (audit F-01, pinned by
+   `tests/write_path.rs`).
 
-Nothing else in the shipped surface loses data against the baseline; the
-linking gap is a functionality gap, not a data-loss one.
+Also fixed on 2026-09-29: deleting one card from a multi-card file in a
+synced book queued a DELETE of the whole file on the server (audit F-15).
 
 ## Ceiling gaps, ranked
 
-By dependency order and by how much of the ceiling each unblocks:
-
-1. **Linking** (03 §5) — the largest baseline gap *and* the prerequisite for
-   the whole CRM layer, which attaches to persons, not cards.
-2. **Duplicate review** (03 §6) — rides on linking (default action is link);
-   closes the last GNOME Contacts aggregation gap.
-3. **Notes + manual interaction log** — the first CRM tier; needs only the
-   local-only collection, which has landed in the substrate.
-4. **Keep-in-touch cadence + overdue list** — blocked on reminders moving to
-   the substrate; this is the trigger for that move per the roadmap.
-5. **RELATED relationships** — small on its own once linking exists.
-6. **Per-person attachments** (local blob dir) — independent of sync work.
-7. **Birthday feed to Slate** — substrate BDAY synthesis (Milestone 1).
-8. **Automatic last-contacted** — blocked on Envelope's hook (Milestone 4).
-9. **Baseline polish trio** — favorites, QR-code sharing, and the
-   Google/Exchange account question (verify first).
-10. **The undecided Monica rows** — journal, gifts, debts, per-contact tasks,
-    calls/conversations, life events. Each needs a have/gap/rejected answer
-    recorded here; an unlisted feature is a hole.
-11. **LDAP read-only** — last, org-user audience, behind the substrate's
-    collection abstraction.
+1. **Favorites** — the last list-level baseline gap. Needs a storage
+   decision first: local (`.crm/`) or synced with the card.
+2. **Adding OAuth accounts from Circle** — sync already works; only the form
+   is missing.
+3. **Exchange / EWS** — not in the substrate.
+4. **Editable relationships** — needs a byte-preserving patcher for
+   `RELATED` / `X-ABRELATEDNAMES` in the substrate.
+5. **Automatic last-contacted from mail** — waits on Envelope's hook.
+6. **Tasks per contact** — decide first.
+7. **Custom fields UI, drag-to-assign, group as compose list, OCR.**
+8. **LDAP read-only** — last, org-user audience, behind the substrate's
+   collection abstraction.
