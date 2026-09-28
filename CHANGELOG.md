@@ -59,6 +59,9 @@ All notable changes to this project are documented here. The format follows
 - Deleting a linked person's row says which card went. Only the card the row
   stands on is deleted, as with editing; the toast used to say the person
   was deleted while they stayed in the list on their other card.
+- A note, contact log, cadence or attachment that could not be saved is no
+  longer shown as saved. It stayed on screen until the next launch and was
+  then gone. The typed note is kept in the field so it can be retried.
 - An attachment whose stored copy was cut short by a crash is repaired the
   next time the same file is attached, and attachments are now stored
   crash-safely.

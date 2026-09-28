@@ -1602,6 +1602,9 @@ impl AppModel {
                 };
                 let text = std::mem::take(&mut self.note_draft);
                 if let Err(why) = self.crm.add_note(&card, &text, chrono::Utc::now()) {
+                    // The note was not saved; losing what was typed as well
+                    // would make the failure cost the user twice.
+                    self.note_draft = text;
                     return self.toast(why);
                 }
             }
