@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Re-importing a CSV with a mapped Unique ID no longer clears what the file
+  does not carry. The row used to replace the contact's modelled fields
+  wholesale, so a CSV with a name and a UID erased the card's emails, numbers,
+  addresses and name parts. A row now only adds: a value it carries replaces
+  or joins the card's, and everything else is left as it was.
+
 ## [1.1.0] - 2026-09-22
 
 ### Changed

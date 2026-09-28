@@ -516,11 +516,11 @@ Grace,Hopper,grace@example.com,grace@import\n\
     // shell does. The photo must survive the update.
     let state = csv::State::open(&path).unwrap();
     let (contacts, _) = state.contacts(&fixture.book.id);
-    for mut contact in contacts {
-        if let Some(existing) = fixture.store.contact(&fixture.book.id, &contact.uid) {
-            contact.file_name = existing.file_name;
-            contact.raw = existing.raw;
-        }
+    for contact in contacts {
+        let contact = match fixture.store.contact(&fixture.book.id, &contact.uid) {
+            Some(existing) => csv::update_of(existing, contact),
+            None => contact,
+        };
         fixture.store.save(&contact).unwrap();
     }
 
@@ -537,6 +537,53 @@ Grace,Hopper,grace@example.com,grace@import\n\
         grace.has_photo,
         "the CSV re-import destroyed the photo a sync had added"
     );
+}
+
+/// A CSV row that names an existing card by UID updates it — and an update
+/// must never clear what the CSV does not carry (PARITY.md, data-loss gap 2).
+///
+/// The seeded card has a work email, a phone, and a grouped home address; the
+/// CSV carries only a name, a new phone, and the UID. Every value the card had
+/// is still there afterwards, the new phone is added beside the old one, and
+/// the mapped name wins.
+#[test]
+fn a_csv_reimport_never_clears_what_the_csv_does_not_carry() {
+    use circle::ui::csv;
+
+    let mut fixture = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("update.csv");
+    std::fs::write(
+        &path,
+        "Display Name,Phone,UID\nAda King,+44 20 7946 0000,ada@server\n",
+    )
+    .unwrap();
+
+    let state = csv::State::open(&path).unwrap();
+    let (rows, _) = state.contacts(&fixture.book.id);
+    for row in rows {
+        let existing = fixture
+            .store
+            .contact(&fixture.book.id, &row.uid)
+            .expect("the row names the seeded card");
+        fixture.store.save(&csv::update_of(existing, row)).unwrap();
+    }
+
+    let ada = fixture.ada();
+    assert_eq!(ada.display_name, "Ada King", "the mapped name did not land");
+    let emails: Vec<&str> = ada.emails.iter().map(|e| e.value.as_str()).collect();
+    assert!(
+        emails.contains(&"ada@work.example") && emails.contains(&"ada@home.example"),
+        "the re-import cleared emails the CSV never mentioned: {emails:?}"
+    );
+    let phones: Vec<&str> = ada.phones.iter().map(|p| p.value.as_str()).collect();
+    assert!(
+        phones.contains(&"+30 210 1234567") && phones.contains(&"+44 20 7946 0000"),
+        "the existing phone was replaced rather than kept beside the new one: {phones:?}"
+    );
+    assert_eq!(ada.name.given, "Ada", "the structured name was cleared");
+    let disk = fixture.on_disk();
+    assert!(disk.contains("GEO:"), "an unmodelled property was lost");
 }
 
 /// The auto-merge contract, from Circle's side: a save queued after an edit

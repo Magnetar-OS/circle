@@ -19,7 +19,8 @@
 //! If a column is mapped to UID, the import becomes repeatable the same way
 //! `.vcf` import is: a row whose UID already exists **updates** that contact —
 //! through the patcher, so a synced card keeps its photo — instead of piling
-//! up a duplicate per import. Without one, every row is a new contact.
+//! up a duplicate per import. The update only adds: see [`update_of`]. Without
+//! a mapped UID, every row is a new contact.
 
 use cosmic::Element;
 use cosmic::iced::Length;
@@ -260,6 +261,77 @@ impl State {
         }
         (out, skipped)
     }
+}
+
+/// A row applied over the contact its mapped UID already names.
+///
+/// Additive, never destructive. The save that follows patches the card from
+/// the model, and the patcher reads an empty list or an absent scalar as
+/// "remove" — so handing it the bare row cleared every email, number, address
+/// and name the CSV happened not to carry. Instead the row is laid over the
+/// existing contact: a scalar the row carries replaces the card's, a list
+/// value the row carries is added unless the card already has it, and
+/// everything the row is silent about stays exactly as it was.
+#[must_use]
+pub fn update_of(existing: Contact, row: Contact) -> Contact {
+    fn add_missing(into: &mut Vec<Typed>, from: Vec<Typed>) {
+        for value in from {
+            if !into.iter().any(|v| v.value.trim() == value.value.trim()) {
+                into.push(value);
+            }
+        }
+    }
+    fn add_missing_text(into: &mut Vec<String>, from: Vec<String>) {
+        for value in from {
+            if !into.contains(&value) {
+                into.push(value);
+            }
+        }
+    }
+
+    let mut contact = existing;
+    if !row.display_name.is_empty() {
+        contact.display_name = row.display_name;
+    }
+    if !row.name.given.is_empty() {
+        contact.name.given = row.name.given;
+    }
+    if !row.name.family.is_empty() {
+        contact.name.family = row.name.family;
+    }
+    if let Some(organisation) = row.organisation {
+        // Departments belong to the company they were listed under.
+        if contact.organisation.as_ref() != Some(&organisation) {
+            contact.organisation_units.clear();
+        }
+        contact.organisation = Some(organisation);
+    }
+    if row.title.is_some() {
+        contact.title = row.title;
+    }
+    if row.note.is_some() {
+        contact.note = row.note;
+    }
+    if row.birthday.is_some() {
+        // A full date and a year-less one are exclusive on a card.
+        contact.birthday = row.birthday;
+        contact.birthday_month_day = None;
+    }
+    add_missing(&mut contact.emails, row.emails);
+    add_missing(&mut contact.phones, row.phones);
+    add_missing(&mut contact.urls, row.urls);
+    add_missing_text(&mut contact.nicknames, row.nicknames);
+    add_missing_text(&mut contact.categories, row.categories);
+    for address in row.addresses {
+        if !contact
+            .addresses
+            .iter()
+            .any(|a| a.one_line() == address.one_line())
+        {
+            contact.addresses.push(address);
+        }
+    }
+    contact
 }
 
 /// Applies one cell to the draft.

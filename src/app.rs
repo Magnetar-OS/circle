@@ -2844,10 +2844,10 @@ impl AppModel {
         let mut updated = 0usize;
         for mut contact in contacts {
             // A mapped UID that already exists means "update that contact":
-            // adopt its file and raw bytes so the save patches losslessly.
+            // the row is laid over it, so the save patches losslessly and
+            // clears nothing the CSV does not carry.
             if let Some(existing) = store.contact(&book_id, &contact.uid) {
-                contact.file_name = existing.file_name;
-                contact.raw = existing.raw;
+                contact = csv::update_of(existing, contact);
                 updated += 1;
             } else {
                 added += 1;
