@@ -15,6 +15,60 @@ pub mod review;
 pub mod settings;
 pub mod share;
 
+/// A vCard `TYPE` token as interface text.
+///
+/// The token is data (`cell`, `WORK`, `x-lab`), and the RFC tokens have names
+/// in every catalogue. A token the catalogue does not know — a server's or
+/// another client's own label — is shown as written rather than guessed at.
+#[must_use]
+pub fn type_label(token: &str) -> String {
+    match token.to_ascii_lowercase().as_str() {
+        "home" => crate::fl!("label-home"),
+        "work" => crate::fl!("label-work"),
+        "cell" | "mobile" => crate::fl!("label-mobile"),
+        "other" => crate::fl!("label-other"),
+        "fax" => crate::fl!("label-fax"),
+        "pager" => crate::fl!("label-pager"),
+        "text" => crate::fl!("label-text"),
+        "video" => crate::fl!("label-video"),
+        "voice" => crate::fl!("phone"),
+        "internet" => crate::fl!("email"),
+        _ => token.to_owned(),
+    }
+}
+
+/// A calendar date as the detail pane writes it, month named from the
+/// catalogue. `None` for the year writes day and month only — a card may
+/// carry a birthday without claiming an age.
+#[must_use]
+pub fn date_label(day: u32, month: u32, year: Option<i32>) -> String {
+    let month = match month {
+        1 => crate::fl!("month-1"),
+        2 => crate::fl!("month-2"),
+        3 => crate::fl!("month-3"),
+        4 => crate::fl!("month-4"),
+        5 => crate::fl!("month-5"),
+        6 => crate::fl!("month-6"),
+        7 => crate::fl!("month-7"),
+        8 => crate::fl!("month-8"),
+        9 => crate::fl!("month-9"),
+        10 => crate::fl!("month-10"),
+        11 => crate::fl!("month-11"),
+        12 => crate::fl!("month-12"),
+        other => format!("{other:02}"),
+    };
+    // Passed as text: Fluent would group a year as "1,815".
+    match year {
+        Some(year) => crate::fl!(
+            "birthday-full",
+            day = day.to_string(),
+            month = month,
+            year = year.to_string()
+        ),
+        None => crate::fl!("birthday-day-month", day = day.to_string(), month = month),
+    }
+}
+
 /// Dimmed secondary text, matching the rest of the suite.
 #[must_use]
 pub fn dim_text(theme: &cosmic::Theme) -> cosmic::iced::widget::text::Style {

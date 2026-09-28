@@ -81,6 +81,10 @@ label-home = Home
 label-work = Work
 label-mobile = Mobile
 label-other = Other
+label-fax = Fax
+label-pager = Pager
+label-text = Text
+label-video = Video
 
 set-preferred = Preferred
 address-street = Street
@@ -91,6 +95,21 @@ address-postcode = Postcode
 address-country = Country
 
 birthday-format = Birthday, as YYYY-MM-DD
+
+birthday-full = { $day } { $month } { $year }
+birthday-day-month = { $day } { $month }
+month-1 = January
+month-2 = February
+month-3 = March
+month-4 = April
+month-5 = May
+month-6 = June
+month-7 = July
+month-8 = August
+month-9 = September
+month-10 = October
+month-11 = November
+month-12 = December
 categories-hint = Separate categories with commas. A comma inside one category is written \\,
 
 add-email = Add an email address

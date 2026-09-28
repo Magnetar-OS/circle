@@ -22,19 +22,8 @@
 //! Composing a single card produces exactly that card, with no source
 //! attribution anywhere — the unlinked case pays nothing for this existing.
 
+use chrono::Datelike as _;
 use cosmic_pim_core::model::Contact;
-
-/// A birthday with no year, as a day and a month.
-///
-/// Formatted through a date in a leap year so the month name is localised by
-/// the same machinery as a full birthday, and so 29 February is expressible.
-/// The year is then not shown, because the card does not claim one.
-fn ageless_birthday(month: u32, day: u32) -> String {
-    chrono::NaiveDate::from_ymd_opt(2024, month, day).map_or_else(
-        || format!("{day:02}-{month:02}"),
-        |date| date.format("%-d %B").to_string(),
-    )
-}
 
 /// One labelled value in the detail pane, and where it came from.
 #[derive(Clone, Debug)]
@@ -122,7 +111,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                 fields.push(Field {
                     label: email
                         .label()
-                        .map_or_else(|| crate::fl!("email"), ToOwned::to_owned),
+                        .map_or_else(|| crate::fl!("email"), super::type_label),
                     value: email.value.clone(),
                     action: Some(format!("mailto:{}", email.value)),
                     icon: "mail-send-symbolic",
@@ -142,7 +131,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                 fields.push(Field {
                     label: phone
                         .label()
-                        .map_or_else(|| crate::fl!("phone"), ToOwned::to_owned),
+                        .map_or_else(|| crate::fl!("phone"), super::type_label),
                     value: phone.value.clone(),
                     // `tel:` is handed to the desktop's handler. Without one
                     // nothing happens, which is why the value stays copyable.
@@ -162,8 +151,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     label: address
                         .types
                         .first()
-                        .cloned()
-                        .unwrap_or_else(|| crate::fl!("address")),
+                        .map_or_else(|| crate::fl!("address"), |t| super::type_label(t)),
                     value: line,
                     action: None,
                     icon: "",
@@ -179,7 +167,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                 fields.push(Field {
                     label: url
                         .label()
-                        .map_or_else(|| crate::fl!("website"), ToOwned::to_owned),
+                        .map_or_else(|| crate::fl!("website"), super::type_label),
                     value: url.value.clone(),
                     action: Some(url.value.clone()),
                     icon: "web-browser-symbolic",
@@ -200,8 +188,8 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
         .find(|(c, _)| c.birthday.is_some() || c.birthday_month_day.is_some())
     {
         let value = match (contact.birthday, contact.birthday_month_day) {
-            (Some(date), _) => date.format("%-d %B %Y").to_string(),
-            (None, Some((month, day))) => ageless_birthday(month, day),
+            (Some(date), _) => super::date_label(date.day(), date.month(), Some(date.year())),
+            (None, Some((month, day))) => super::date_label(day, month, None),
             (None, None) => unreachable!("just filtered for one of them"),
         };
         fields.push(Field {
@@ -342,6 +330,59 @@ mod tests {
                 crate::fl!("phone"),
                 crate::fl!("website")
             ]
+        );
+    }
+
+    /// A `TYPE` is a vCard token, not interface text: `cell` and `work` in
+    /// front of a Greek reader is the English the catalogue exists to avoid.
+    /// Known tokens go through the catalogue; one it does not know (a
+    /// server's own label) is shown as written.
+    #[test]
+    fn a_typed_value_is_labelled_in_the_interface_language() {
+        let mut card = contact("personal", "a", "Ada Lovelace");
+        let mut mobile = typed("+30 694 1234567");
+        mobile.types = vec!["CELL".to_owned()];
+        let mut office = typed("ada@work.example");
+        office.types = vec!["work".to_owned()];
+        let mut custom = typed("+30 210 7654321");
+        custom.types = vec!["x-lab".to_owned()];
+        card.emails.push(office);
+        card.phones.push(mobile);
+        card.phones.push(custom);
+
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        let labels: Vec<&str> = composed.fields.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                crate::fl!("label-work"),
+                crate::fl!("label-mobile"),
+                "x-lab".to_owned()
+            ]
+        );
+    }
+
+    /// The month name comes from the catalogue, not from chrono's English.
+    #[test]
+    fn a_birthday_is_written_with_the_catalogues_month() {
+        let mut card = contact("personal", "a", "Ada Lovelace");
+        card.birthday = chrono::NaiveDate::from_ymd_opt(1815, 12, 10);
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        let birthday = composed
+            .fields
+            .iter()
+            .find(|f| f.label == crate::fl!("birthday"))
+            .unwrap();
+        assert_eq!(
+            birthday.value,
+            crate::fl!(
+                "birthday-full",
+                day = "10",
+                month = crate::fl!("month-12"),
+                year = "1815"
+            )
         );
     }
 

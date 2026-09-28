@@ -62,6 +62,11 @@ All notable changes to this project are documented here. The format follows
 - A note, contact log, cadence or attachment that could not be saved is no
   longer shown as saved. It stayed on screen until the next launch and was
   then gone. The typed note is kept in the field so it can be retried.
+- Labels and birthdays are shown in the interface language. A number typed
+  `cell` or `work` on the card read "cell" and "work", and months were
+  always English; the standard labels and the month names now come from the
+  translation, and a label only the card's own app knows is shown as
+  written. The editor's label menu is translated too.
 - An attachment whose stored copy was cut short by a crash is repaired the
   next time the same file is attached, and attachments are now stored
   crash-safely.

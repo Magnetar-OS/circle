@@ -153,6 +153,8 @@ pub struct State {
     pub books: Vec<String>,
     /// Human names for `books`, which `widget::dropdown` needs as a slice.
     pub book_names: Vec<String>,
+    /// [`LABELS`] in the interface language, for the same reason.
+    pub label_names: Vec<String>,
     /// The pending photo change, applied by the shell on save.
     pub photo: PhotoEdit,
     /// Membership in the book's `KIND:group` cards, applied by the shell on
@@ -177,6 +179,7 @@ impl State {
             categories_text,
             books: ids,
             book_names: names,
+            label_names: LABELS.iter().map(|t| super::type_label(t)).collect(),
             photo: PhotoEdit::Keep,
             groups: Vec::new(),
         }
@@ -193,6 +196,7 @@ impl State {
             categories_text: String::new(),
             books: ids,
             book_names: names,
+            label_names: LABELS.iter().map(|t| super::type_label(t)).collect(),
             photo: PhotoEdit::Keep,
             groups: Vec::new(),
         }
@@ -436,12 +440,14 @@ pub fn view(state: &State) -> Element<'_, Message> {
         fl!("email"),
         ListKind::Email,
         &state.contact.emails,
+        &state.label_names,
         fl!("add-email"),
     ));
     column = column.push(typed_section(
         fl!("phone"),
         ListKind::Phone,
         &state.contact.phones,
+        &state.label_names,
         fl!("add-phone"),
     ));
     column = column.push(address_section(state));
@@ -449,6 +455,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         fl!("website"),
         ListKind::Url,
         &state.contact.urls,
+        &state.label_names,
         fl!("add-url"),
     ));
     column = column.push(nickname_section(state));
@@ -535,12 +542,13 @@ fn name_section(state: &State) -> Element<'_, Message> {
 }
 
 /// One repeating section of typed values — emails, phones, or websites.
-fn typed_section(
+fn typed_section<'a>(
     title: String,
     kind: ListKind,
-    values: &[Typed],
+    values: &'a [Typed],
+    label_names: &'a [String],
     add_label: String,
-) -> Element<'_, Message> {
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut section = widget::settings::section().title(title);
 
@@ -568,7 +576,7 @@ fn typed_section(
                 .first()
                 .and_then(|t| LABELS.iter().position(|l| l.eq_ignore_ascii_case(t)));
             row = row
-                .push(widget::dropdown(LABELS, selected, move |l| {
+                .push(widget::dropdown(label_names, selected, move |l| {
                     Message::ListLabel(kind, index, l)
                 }))
                 .push(preferred_button(kind, index, entry.pref == Some(1)))

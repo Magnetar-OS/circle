@@ -83,6 +83,10 @@ label-home = Οικία
 label-work = Εργασία
 label-mobile = Κινητό
 label-other = Άλλο
+label-fax = Φαξ
+label-pager = Βομβητής
+label-text = Μηνύματα
+label-video = Βίντεο
 
 set-preferred = Προτιμώμενο
 address-street = Οδός
@@ -93,6 +97,21 @@ address-postcode = Ταχυδρομικός κώδικας
 address-country = Χώρα
 
 birthday-format = Γενέθλια, ως ΕΕΕΕ-ΜΜ-ΗΗ
+
+birthday-full = { $day } { $month } { $year }
+birthday-day-month = { $day } { $month }
+month-1 = Ιανουαρίου
+month-2 = Φεβρουαρίου
+month-3 = Μαρτίου
+month-4 = Απριλίου
+month-5 = Μαΐου
+month-6 = Ιουνίου
+month-7 = Ιουλίου
+month-8 = Αυγούστου
+month-9 = Σεπτεμβρίου
+month-10 = Οκτωβρίου
+month-11 = Νοεμβρίου
+month-12 = Δεκεμβρίου
 categories-hint = Χωρίστε τις κατηγορίες με κόμματα. Ένα κόμμα μέσα σε μια κατηγορία γράφεται \\,
 
 add-email = Προσθήκη διεύθυνσης email
