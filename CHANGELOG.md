@@ -53,6 +53,9 @@ All notable changes to this project are documented here. The format follows
   hiding its notes or unlinking its cards. Linking two linked people now
   writes the merged record before removing the old ones, and a record that
   cannot be removed is reported instead of ignored.
+- Deleting one contact from a file that holds several, in a synced address
+  book, uploads the file with the others still in it. It used to delete the
+  whole file from the server, taking everybody else in it along.
 - An attachment whose stored copy was cut short by a crash is repaired the
   next time the same file is attached, and attachments are now stored
   crash-safely.

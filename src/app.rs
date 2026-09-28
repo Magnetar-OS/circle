@@ -1819,12 +1819,12 @@ impl AppModel {
                     // The server-side coordinates live in the sidecar, which
                     // survives the local delete — but the file name has to be
                     // taken while the card still exists.
-                    let file_name = store.contact(&key.book, &key.uid).map(|c| c.file_name);
+                    let card = store.contact(&key.book, &key.uid);
                     if let Err(why) = store.delete(&key.book, &key.uid) {
                         return self.toast(fl!("error-delete", name = name, why = why.to_string()));
                     }
-                    if let Some(file_name) = file_name {
-                        queue_removal(store, &key.book, &file_name);
+                    if let Some(card) = card {
+                        queue_card_removal(store, &key.book, &card.file_name, &card.raw);
                     }
                     self.selected = None;
                     self.editor = None;
@@ -2342,7 +2342,7 @@ impl AppModel {
                 });
                 continue;
             }
-            queue_removal(store, &key.book, &contact.file_name);
+            queue_card_removal(store, &key.book, &contact.file_name, &contact.raw);
             self.photos.remove(key);
             label = contact.label();
             let card = crate::links::CardRef {
@@ -3282,6 +3282,24 @@ fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
     }
 }
 
+/// Queues the server side of deleting one card from `file_name`.
+///
+/// The resource on the server is the file. When the card was the whole file
+/// the resource goes; when the file still holds other cards (an export placed
+/// in a synced book) the rewritten file is uploaded instead — a DELETE would
+/// take everybody else in it off the server too. `before` is the file's text
+/// before the delete, the base for that upload.
+fn queue_card_removal(store: &ContactStore, book_id: &str, file_name: &str, before: &str) {
+    let remains = store
+        .book(book_id)
+        .is_some_and(|book| book.path.join(file_name).exists());
+    if remains {
+        queue_push_with_base(store, book_id, file_name, Some(before));
+    } else {
+        queue_removal(store, book_id, file_name);
+    }
+}
+
 /// What a sync pass tells the UI thread.
 #[derive(Clone, Debug)]
 pub struct SyncSummary {
@@ -3659,6 +3677,75 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
 
         let summary = SyncSummary::of(&[calendar, clean]);
         assert!(summary.attention.is_empty());
+    }
+
+    /// Deleting one card out of a synced file that holds two: the resource
+    /// on the server is the file, and the other card is still in it. A
+    /// DELETE for the href took the other person off the server too.
+    #[test]
+    fn deleting_one_card_of_a_shared_synced_file_uploads_the_rest() {
+        use cosmic_pim_caldav::push::{PushOp, PushQueue as _};
+        use cosmic_pim_caldav::{CalDavStore as _, RemoteEvent, VdirStore};
+
+        const TWO: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n\
+BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Synced", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        let mut vdir = VdirStore::open_carddav(book.clone()).unwrap();
+        vdir.set_remote("/dav/ab/", false).unwrap();
+        vdir.upsert(&RemoteEvent {
+            href: "/dav/ab/both.vcf".into(),
+            etag: "\"v1\"".into(),
+            ics: TWO.into(),
+        })
+        .unwrap();
+        store.refresh();
+
+        let ada = store.contact(&book.id, "ada").unwrap();
+        store.delete(&book.id, "ada").unwrap();
+        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw);
+
+        let pending = VdirStore::open(book).unwrap().pending();
+        assert_eq!(pending.len(), 1);
+        assert!(
+            matches!(pending[0].op, PushOp::Put { .. }),
+            "queued {:?} for a file that still holds Bob",
+            pending[0].op
+        );
+    }
+
+    /// The ordinary case: the card was the whole file, so the resource goes.
+    #[test]
+    fn deleting_a_card_that_was_its_whole_file_deletes_the_resource() {
+        use cosmic_pim_caldav::push::{PushOp, PushQueue as _};
+        use cosmic_pim_caldav::{CalDavStore as _, RemoteEvent, VdirStore};
+
+        const ONE: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n";
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Synced", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        let mut vdir = VdirStore::open_carddav(book.clone()).unwrap();
+        vdir.set_remote("/dav/ab/", false).unwrap();
+        vdir.upsert(&RemoteEvent {
+            href: "/dav/ab/ada.vcf".into(),
+            etag: "\"v1\"".into(),
+            ics: ONE.into(),
+        })
+        .unwrap();
+        store.refresh();
+
+        let ada = store.contact(&book.id, "ada").unwrap();
+        store.delete(&book.id, "ada").unwrap();
+        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw);
+
+        let pending = VdirStore::open(book).unwrap().pending();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(pending[0].op, PushOp::Delete { .. }));
     }
 
     /// A PNG of the given size, for the photo-processing tests.
