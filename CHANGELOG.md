@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
   membership was silently dropped on save.
 - An unreadable notes record no longer lets the start-up clean-up delete the
   attachments it names; the clean-up waits until every record reads.
+- Duplicate review names the number two cards actually share, not the first
+  number on one of them.
 
 ## [1.1.0] - 2026-09-22
 

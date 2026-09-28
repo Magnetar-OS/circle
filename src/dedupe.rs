@@ -48,7 +48,7 @@ pub enum Reason {
     /// Both cards carry this address.
     Email(String),
     /// Both cards carry a number with the same significant digits; the value
-    /// is the way the first card spells it.
+    /// is the way the first card spells that shared number.
     Phone(String),
     /// The names transliterate to something similar. A guess.
     Name,
@@ -122,7 +122,9 @@ pub fn candidates(contacts: &[Contact], links: &LinkStore) -> Vec<Candidate> {
 
     // --- exact keys: one pass, no pairwise comparison at all ---
     let mut by_email: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut by_phone: HashMap<String, Vec<usize>> = HashMap::new();
+    // Each entry keeps the card's own spelling of the number, so the reason
+    // shown is the number the pair shares rather than whichever came first.
+    let mut by_phone: HashMap<String, Vec<(usize, String)>> = HashMap::new();
     for (index, contact) in contacts.iter().enumerate() {
         for email in &contact.emails {
             let key = email.value.trim().to_lowercase();
@@ -132,7 +134,10 @@ pub fn candidates(contacts: &[Contact], links: &LinkStore) -> Vec<Candidate> {
         }
         for phone in &contact.phones {
             if let Some(key) = phone_key(&phone.value) {
-                by_phone.entry(key).or_default().push(index);
+                by_phone
+                    .entry(key)
+                    .or_default()
+                    .push((index, phone.value.clone()));
             }
         }
     }
@@ -142,12 +147,13 @@ pub fn candidates(contacts: &[Contact], links: &LinkStore) -> Vec<Candidate> {
             propose(a, b, Reason::Email(address.clone()));
         }
     }
-    for indices in by_phone.values() {
-        for (a, b) in pairs(indices) {
-            let spelling = contacts[a]
-                .phones
-                .first()
-                .map(|p| p.value.clone())
+    for entries in by_phone.values() {
+        let indices: Vec<usize> = entries.iter().map(|(index, _)| *index).collect();
+        for (a, b) in pairs(&indices) {
+            let spelling = entries
+                .iter()
+                .find(|(index, _)| *index == a)
+                .map(|(_, spelling)| spelling.clone())
                 .unwrap_or_default();
             propose(a, b, Reason::Phone(spelling));
         }
@@ -272,6 +278,28 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert!(found[0].reason.is_strong());
+    }
+
+    /// The review screen shows the reason verbatim so the user judges the
+    /// evidence. It named the first card's *first* number, which for anybody
+    /// with a mobile and a landline is often not the number the two share.
+    #[test]
+    fn a_phone_reason_names_the_number_the_cards_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let links = LinkStore::open(dir.path());
+        let first = with_phone(
+            with_phone(contact("personal", "a", "Ada"), "+30 210 7777777"),
+            "+44 20 7946 0123",
+        );
+        let found = candidates(
+            &[
+                first,
+                with_phone(contact("work", "b", "Zed"), "020 7946 0123"),
+            ],
+            &links,
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].reason, Reason::Phone("+44 20 7946 0123".into()));
     }
 
     #[test]
