@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format follows
 - An account whose address books could not be reached says so on the
   Accounts page, instead of reading "up to date" because its calendars
   synced.
+- Moving a new contact to another address book in the editor offers that
+  book's groups. The first book's groups stayed on screen and any toggled
+  membership was silently dropped on save.
 - An unreadable notes record no longer lets the start-up clean-up delete the
   attachments it names; the clean-up waits until every record reads.
 

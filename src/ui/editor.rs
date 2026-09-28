@@ -341,8 +341,14 @@ impl State {
                 ..Address::default()
             }),
             Message::Book(index) => {
-                if let Some(id) = self.books.get(index) {
+                if let Some(id) = self.books.get(index)
+                    && *id != self.contact.addressbook_id
+                {
                     self.contact.addressbook_id.clone_from(id);
+                    // Group cards live in one book; the old book's rows would
+                    // be saved against the new one and silently find nothing.
+                    // The shell refills them for the book now chosen.
+                    self.groups.clear();
                 }
             }
             Message::GroupToggled(index, member) => {
@@ -901,6 +907,33 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
 
     fn state() -> State {
         State::create("default", &[])
+    }
+
+    /// Group cards belong to one book. A new contact moved to another book in
+    /// the dropdown must not keep offering — and on save silently drop — the
+    /// first book's groups; the shell refills the rows for the new book.
+    #[test]
+    fn moving_a_new_contact_to_another_book_drops_the_first_books_groups() {
+        let mut state = State {
+            books: vec!["personal".into(), "work".into()],
+            book_names: vec!["Personal".into(), "Work".into()],
+            ..State::create("personal", &[])
+        }
+        .with_groups(vec![GroupRow {
+            uid: "friends@personal".into(),
+            name: "Friends".into(),
+            member: false,
+            was_member: false,
+        }]);
+        state.update(Message::GroupToggled(0, true));
+        assert_eq!(state.changed_groups().len(), 1);
+
+        state.update(Message::Book(1));
+        assert_eq!(state.contact.addressbook_id, "work");
+        assert!(
+            state.groups.is_empty(),
+            "the rows still name groups in the book the contact left"
+        );
     }
 
     #[test]

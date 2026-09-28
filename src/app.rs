@@ -1257,8 +1257,23 @@ impl AppModel {
                         }
                     });
                 }
+                let book_changed = matches!(message, editor::Message::Book(_));
                 if let Some(state) = self.editor.as_mut() {
                     state.update(message);
+                }
+                // A new contact moved to another book: offer that book's
+                // groups, which the editor cannot read for itself.
+                if book_changed
+                    && let Some(book) = self
+                        .editor
+                        .as_ref()
+                        .filter(|state| state.groups.is_empty())
+                        .map(|state| state.contact.addressbook_id.clone())
+                {
+                    let groups = self.group_rows(&book, None);
+                    if let Some(state) = self.editor.as_mut() {
+                        state.groups = groups;
+                    }
                 }
             }
             Message::EditorSave => return self.save_editor(),
