@@ -201,6 +201,7 @@ sync-now = Sync now
 syncing = Syncing…
 sync-contacts-unreachable = address books not reached: { $why }
 sync-needs-attention = Contacts sync needs you: { $accounts }
+error-queue-upload = Saved here, but not queued for upload, so the server keeps its copy until this contact is saved again: { $why }
 sync-interval = Background sync
 sync-interval-description = How often to sync accounts on their own. Sync now always works.
 sync-off = Only when I press Sync

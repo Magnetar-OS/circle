@@ -1829,13 +1829,16 @@ impl AppModel {
                     if let Err(why) = store.delete(&key.book, &key.uid) {
                         return self.toast(fl!("error-delete", name = name, why = why.to_string()));
                     }
-                    if let Some(card) = card {
-                        queue_card_removal(store, &key.book, &card.file_name, &card.raw);
-                    }
+                    let queued = card.map_or(Ok(()), |card| {
+                        queue_card_removal(store, &key.book, &card.file_name, &card.raw)
+                    });
                     self.selected = None;
                     self.editor = None;
                     self.rebuild_nav();
                     self.reload();
+                    if let Err(why) = queued {
+                        return self.toast(why);
+                    }
                 }
                 _ => return Task::none(),
             },
@@ -1865,12 +1868,15 @@ impl AppModel {
                 let Some(book) = self.config.new_card_book(store.books()) else {
                     return self.toast(fl!("error-no-writable-book"));
                 };
-                match store.create_group(name.trim(), &book, version) {
+                let queued = match store.create_group(name.trim(), &book, version) {
                     Ok(group) => queue_push(store, &book, &group.file_name),
                     Err(why) => return self.toast(why.to_string()),
-                }
+                };
                 self.rebuild_nav();
                 self.reload();
+                if let Err(why) = queued {
+                    return self.toast(why);
+                }
             }
         }
         Task::none()
@@ -2329,7 +2335,10 @@ impl AppModel {
                 });
                 continue;
             }
-            queue_card_removal(store, &key.book, &contact.file_name, &contact.raw);
+            if let Err(why) = queue_card_removal(store, &key.book, &contact.file_name, &contact.raw)
+            {
+                first_error.get_or_insert(why);
+            }
             self.photos.remove(key);
             label = contact.label();
             let card = crate::links::CardRef {
@@ -2429,7 +2438,9 @@ impl AppModel {
                 &restored,
             ) {
                 Ok(()) => {
-                    queue_push(store, &card.book, &card.file_name);
+                    if let Err(why) = queue_push(store, &card.book, &card.file_name) {
+                        first_error.get_or_insert(why);
+                    }
                     if let Some(record) = card.crm {
                         let card = crate::links::CardRef {
                             book: card.book.clone(),
@@ -2485,12 +2496,14 @@ impl AppModel {
                 Ok(()) => {
                     // The card was read two lines up; its raw is the pre-edit
                     // text sync can merge against.
-                    queue_push_with_base(
+                    if let Err(why) = queue_push_with_base(
                         store,
                         &key.book,
                         &contact.file_name,
                         (!base.trim().is_empty()).then_some(base.as_str()),
-                    );
+                    ) {
+                        first_error.get_or_insert(why);
+                    }
                     joined += 1;
                 }
                 Err(why) => {
@@ -2648,17 +2661,23 @@ impl AppModel {
                 self.toast(fl!("import-empty", path = file_label(path)))
             }
             Ok(summary) => {
-                for file in &summary.files {
-                    queue_push(store, &book_id, file);
-                }
+                let queued = summary
+                    .files
+                    .iter()
+                    .map(|file| queue_push(store, &book_id, file))
+                    .find_map(Result::err);
                 // An updated card may carry a new photo under an old key.
                 self.photos.clear();
                 self.reload();
-                self.toast(fl!(
+                let done = self.toast(fl!(
                     "import-done",
                     added = summary.added.to_string(),
                     updated = summary.updated.to_string()
-                ))
+                ));
+                match queued {
+                    Some(why) => Task::batch([done, self.toast(why)]),
+                    None => done,
+                }
             }
             Err(why) => self.toast(why.to_string()),
         }
@@ -2701,10 +2720,13 @@ impl AppModel {
         // opened on — exactly what this edit was made against — which is what
         // lets sync auto-merge if the server changed the card meanwhile; a
         // brand-new contact has no before and queues without one.
-        if let Some(saved) = store.contact(&contact.addressbook_id, &contact.uid) {
-            let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
-            queue_push_with_base(store, &contact.addressbook_id, &saved.file_name, base);
-        }
+        let queued = match store.contact(&contact.addressbook_id, &contact.uid) {
+            Some(saved) => {
+                let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
+                queue_push_with_base(store, &contact.addressbook_id, &saved.file_name, base)
+            }
+            None => Ok(()),
+        };
 
         // The photo change runs against the *saved* bytes, which is what makes
         // it uniform for new and existing cards: after the save above, both
@@ -2716,13 +2738,18 @@ impl AppModel {
             self.editor = None;
             self.selected = Some(ContactKey::of(&contact));
             self.reload();
-            return self.toast(fl!("error-photo", why = why));
+            let photo = self.toast(fl!("error-photo", why = why));
+            return match queued {
+                Err(why) => Task::batch([photo, self.toast(why)]),
+                Ok(()) => photo,
+            };
         }
 
         // Membership lives on the GROUP cards, so the changed rows patch those
         // — only the changed ones, or every contact save would churn every
         // group file and push them all to the server unchanged.
-        let membership_error = apply_group_changes(store, &contact, &changed_groups);
+        let membership_error =
+            apply_group_changes(store, &contact, &changed_groups).or(queued.err());
 
         // The card's bytes just changed; a cached photo decoded from the old
         // bytes must not survive the save.
@@ -2918,6 +2945,7 @@ impl AppModel {
 
         let mut added = 0usize;
         let mut updated = 0usize;
+        let mut queue_error: Option<String> = None;
         for mut contact in contacts {
             // A mapped UID that already exists means "update that contact":
             // the row is laid over it, so the save patches losslessly and
@@ -2941,19 +2969,25 @@ impl AppModel {
                 // An updated row adopted the existing card's bytes above;
                 // those are its base. An added row has no before.
                 let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
-                queue_push_with_base(store, &book_id, &saved.file_name, base);
+                if let Err(why) = queue_push_with_base(store, &book_id, &saved.file_name, base) {
+                    queue_error.get_or_insert(why);
+                }
             }
         }
 
         self.csv = None;
         self.rebuild_nav();
         self.reload();
-        self.toast(fl!(
+        let done = self.toast(fl!(
             "csv-import-done",
             added = added.to_string(),
             updated = updated.to_string(),
             skipped = skipped.to_string()
-        ))
+        ));
+        match queue_error {
+            Some(why) => Task::batch([done, self.toast(why)]),
+            None => done,
+        }
     }
 
     /// The duplicate review pane, with its own header and close button.
@@ -3180,12 +3214,16 @@ fn apply_group_changes(
             // Queued here rather than by the caller because this is where the
             // group's pre-edit bytes are in hand — the base sync merges
             // against if the server changed the group card meanwhile.
-            Ok(()) => queue_push_with_base(
-                store,
-                &contact.addressbook_id,
-                &group.file_name,
-                Some(&group.raw),
-            ),
+            Ok(()) => {
+                if let Err(why) = queue_push_with_base(
+                    store,
+                    &contact.addressbook_id,
+                    &group.file_name,
+                    Some(&group.raw),
+                ) {
+                    first_error.get_or_insert(why);
+                }
+            }
             Err(why) => {
                 first_error.get_or_insert_with(|| why.to_string());
             }
@@ -3251,17 +3289,18 @@ fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'stat
 ///
 /// Storage deliberately knows nothing about CardDAV (see
 /// `cosmic_pim_sync::writeback`), so every write site in this file pairs its
-/// save with this call. A local-only book queues nothing, and a failure to
-/// queue is a warning rather than an error: the local save already succeeded,
-/// and the card's text is not at risk.
+/// save with this call. A local-only book queues nothing. A failure to queue
+/// does not undo the local save — the card's text is not at risk — but it is
+/// returned, as a sentence for a toast, because the edit will not reach the
+/// server until the card is written again, and nobody would otherwise know.
 ///
 /// Sites that read the card before overwriting it call
 /// [`queue_push_with_base`] instead: the pre-edit bytes are what let the sync
 /// engine three-way-merge automatically when the server turns out to have
 /// changed the same card. This form is for writes with no meaningful "before"
 /// — a brand-new file, an undo restoring a deleted one, a bulk import.
-fn queue_push(store: &ContactStore, book_id: &str, file_name: &str) {
-    queue_push_with_base(store, book_id, file_name, None);
+fn queue_push(store: &ContactStore, book_id: &str, file_name: &str) -> Result<(), String> {
+    queue_push_with_base(store, book_id, file_name, None)
 }
 
 /// [`queue_push`], carrying the card's pre-edit bytes.
@@ -3270,18 +3309,22 @@ fn queue_push(store: &ContactStore, book_id: &str, file_name: &str) {
 /// was made against. The queue keeps the base from the first enqueue only, so
 /// stacked unsent edits keep the oldest base (the last text the server
 /// acknowledged) without any bookkeeping here.
-fn queue_push_with_base(store: &ContactStore, book_id: &str, file_name: &str, base: Option<&str>) {
-    if let Err(why) = cosmic_pim_sync::queue_save_with_base(store.root(), book_id, file_name, base)
-    {
-        tracing::warn!(book_id, file_name, %why, "could not queue the save for upload");
-    }
+fn queue_push_with_base(
+    store: &ContactStore,
+    book_id: &str,
+    file_name: &str,
+    base: Option<&str>,
+) -> Result<(), String> {
+    cosmic_pim_sync::queue_save_with_base(store.root(), book_id, file_name, base)
+        .map(|_| ())
+        .map_err(|why| fl!("error-queue-upload", why = why.to_string()))
 }
 
 /// The delete-side twin of [`queue_push`].
-fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
-    if let Err(why) = cosmic_pim_sync::queue_delete(store.root(), book_id, file_name) {
-        tracing::warn!(book_id, file_name, %why, "could not queue the deletion for upload");
-    }
+fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) -> Result<(), String> {
+    cosmic_pim_sync::queue_delete(store.root(), book_id, file_name)
+        .map(|_| ())
+        .map_err(|why| fl!("error-queue-upload", why = why.to_string()))
 }
 
 /// Whether the card at `(book, uid)` belongs to a linked person who still
@@ -3308,14 +3351,19 @@ fn has_linked_cards_left(
 /// in a synced book) the rewritten file is uploaded instead — a DELETE would
 /// take everybody else in it off the server too. `before` is the file's text
 /// before the delete, the base for that upload.
-fn queue_card_removal(store: &ContactStore, book_id: &str, file_name: &str, before: &str) {
+fn queue_card_removal(
+    store: &ContactStore,
+    book_id: &str,
+    file_name: &str,
+    before: &str,
+) -> Result<(), String> {
     let remains = store
         .book(book_id)
         .is_some_and(|book| book.path.join(file_name).exists());
     if remains {
-        queue_push_with_base(store, book_id, file_name, Some(before));
+        queue_push_with_base(store, book_id, file_name, Some(before))
     } else {
-        queue_removal(store, book_id, file_name);
+        queue_removal(store, book_id, file_name)
     }
 }
 
@@ -3725,7 +3773,7 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
 
         let ada = store.contact(&book.id, "ada").unwrap();
         store.delete(&book.id, "ada").unwrap();
-        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw);
+        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
 
         let pending = VdirStore::open(book).unwrap().pending();
         assert_eq!(pending.len(), 1);
@@ -3760,7 +3808,7 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
 
         let ada = store.contact(&book.id, "ada").unwrap();
         store.delete(&book.id, "ada").unwrap();
-        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw);
+        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
 
         let pending = VdirStore::open(book).unwrap().pending();
         assert_eq!(pending.len(), 1);
@@ -3812,6 +3860,23 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             !has_linked_cards_left(&links, &store, &work.id, "b"),
             "the last card of a person is the person"
         );
+    }
+
+    /// A save that could not be queued stays local and never reaches the
+    /// server; the helpers used to log that and carry on, so nobody knew.
+    #[test]
+    fn a_failure_to_queue_an_upload_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Synced", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        // The sync state cannot be read: its path is a directory.
+        std::fs::create_dir(book.path.join(".caldav-state.json")).unwrap();
+
+        let err = queue_push(&store, &book.id, "ada.vcf").unwrap_err();
+        assert!(!err.is_empty());
+        assert!(queue_removal(&store, &book.id, "ada.vcf").is_err());
     }
 
     /// A PNG of the given size, for the photo-processing tests.
