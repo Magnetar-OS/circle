@@ -43,7 +43,6 @@ chrono = { version = "0.4.45", features = ["clock", "serde"] }
 # a camera photo pasted verbatim makes a 10 MB vCard that some servers reject.
 # Already in the dependency graph through libcosmic, so this costs no new build.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0.229", features = ["derive"] }
