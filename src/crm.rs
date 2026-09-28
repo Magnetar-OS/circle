@@ -198,23 +198,22 @@ impl CrmStore {
         if text.is_empty() {
             return Ok(()); // An empty note is not a note.
         }
-        let record = self.records.entry(card.clone()).or_default();
-        record.notes.push(Note {
-            id: uuid::Uuid::new_v4().simple().to_string(),
-            at: now,
-            text: text.to_owned(),
-        });
-        self.write(card)
+        self.change(card, |record| {
+            record.notes.push(Note {
+                id: uuid::Uuid::new_v4().simple().to_string(),
+                at: now,
+                text: text.to_owned(),
+            });
+        })
     }
 
     /// Removes one note by id. Removing the last thing on a record deletes the
     /// file rather than leaving an empty one behind.
     pub fn remove_note(&mut self, card: &CardRef, id: &str) -> Result<(), String> {
-        let Some(record) = self.records.get_mut(card) else {
+        if !self.records.contains_key(card) {
             return Ok(());
-        };
-        record.notes.retain(|note| note.id != id);
-        self.write(card)
+        }
+        self.change(card, |record| record.notes.retain(|note| note.id != id))
     }
 
     /// Records that you were in touch.
@@ -224,19 +223,17 @@ impl CrmStore {
         kind: &str,
         now: DateTime<Utc>,
     ) -> Result<(), String> {
-        let record = self.records.entry(card.clone()).or_default();
-        record.interactions.push(Interaction {
-            at: now,
-            kind: kind.trim().to_owned(),
-        });
-        self.write(card)
+        self.change(card, |record| {
+            record.interactions.push(Interaction {
+                at: now,
+                kind: kind.trim().to_owned(),
+            });
+        })
     }
 
     /// Sets, or clears, how often you mean to be in touch with this card.
     pub fn set_cadence(&mut self, card: &CardRef, days: Option<u32>) -> Result<(), String> {
-        let record = self.records.entry(card.clone()).or_default();
-        record.cadence_days = days.filter(|d| *d > 0);
-        self.write(card)
+        self.change(card, |record| record.cadence_days = days.filter(|d| *d > 0))
     }
 
     /// Attaches an already-stored file to a card.
@@ -249,22 +246,23 @@ impl CrmStore {
         card: &CardRef,
         attachment: crate::attachments::Attachment,
     ) -> Result<(), String> {
-        let record = self.records.entry(card.clone()).or_default();
-        if record.attachments.iter().any(|a| a.blob == attachment.blob) {
+        if self
+            .records
+            .get(card)
+            .is_some_and(|r| r.attachments.iter().any(|a| a.blob == attachment.blob))
+        {
             return Ok(());
         }
-        record.attachments.push(attachment);
-        self.write(card)
+        self.change(card, |record| record.attachments.push(attachment))
     }
 
     /// Removes one attachment reference. The blob itself is the caller's
     /// business — see [`Self::is_blob_referenced`].
     pub fn detach(&mut self, card: &CardRef, blob: &str) -> Result<(), String> {
-        let Some(record) = self.records.get_mut(card) else {
+        if !self.records.contains_key(card) {
             return Ok(());
-        };
-        record.attachments.retain(|a| a.blob != blob);
-        self.write(card)
+        }
+        self.change(card, |record| record.attachments.retain(|a| a.blob != blob))
     }
 
     /// Whether any record still names this blob.
@@ -287,8 +285,7 @@ impl CrmStore {
         if record.is_empty() {
             return Ok(());
         }
-        self.records.insert(card.clone(), record);
-        self.write(card)
+        self.change(card, |slot| *slot = record)
     }
 
     /// Drops everything recorded against a card — for when the card itself is
@@ -302,6 +299,22 @@ impl CrmStore {
             Err(why) if why.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(why) => Err(why.to_string()),
         }
+    }
+
+    /// Applies `edit` to a card's record and writes it. When the write fails
+    /// the record is put back as it was, so memory never claims what the
+    /// disk refused — a note shown as saved would be gone at the next launch.
+    fn change(&mut self, card: &CardRef, edit: impl FnOnce(&mut Record)) -> Result<(), String> {
+        let before = self.records.get(card).cloned();
+        edit(self.records.entry(card.clone()).or_default());
+        self.write(card).inspect_err(|_| match before {
+            Some(record) => {
+                self.records.insert(card.clone(), record);
+            }
+            None => {
+                self.records.remove(card);
+            }
+        })
     }
 
     fn write(&self, card: &CardRef) -> Result<(), String> {
@@ -488,6 +501,35 @@ mod tests {
 
     fn at(days_ago: i64) -> DateTime<Utc> {
         Utc::now() - chrono::Duration::days(days_ago)
+    }
+
+    /// A store whose record for `c` cannot be written: its path is a
+    /// directory with something in it, which no rename replaces.
+    fn unwritable(dir: &Path, c: &CardRef) -> CrmStore {
+        let store = CrmStore::open(dir);
+        let path = store.path_for(c);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("keep"), b"").unwrap();
+        store
+    }
+
+    /// A note that could not be saved must not be shown as saved: it would
+    /// sit in the pane until the next launch and then be gone.
+    #[test]
+    fn a_failed_write_leaves_nothing_behind_in_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = card("personal", "ada");
+        let mut store = unwritable(dir.path(), &c);
+
+        assert!(store.add_note(&c, "met at the museum", at(0)).is_err());
+        assert!(store.log_interaction(&c, "call", at(0)).is_err());
+        assert!(store.set_cadence(&c, Some(30)).is_err());
+        assert!(
+            store.record(&c).is_none_or(Record::is_empty),
+            "memory kept what the disk refused: {:?}",
+            store.record(&c)
+        );
+        assert!(!store.has_any_cadence());
     }
 
     #[test]
