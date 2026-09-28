@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Delete deletes the selected contact (with the same Undo), and Ctrl+Shift+R
+  syncs now. Ctrl+R stays Refresh.
 - The launcher lists a linked person once, as the contact list does, instead
   of once per card.
 - Rebuilt against the current COSMIC libraries (libcosmic `03d7dcb`).

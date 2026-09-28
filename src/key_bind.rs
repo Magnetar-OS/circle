@@ -10,18 +10,24 @@
 //!
 //! # Why these keys
 //!
-//! Modifiers on everything, the same rule Slate follows. This app is mostly
-//! text entry — a search field, and an editor full of name and address fields —
-//! so an unmodified `n` reaching the app while somebody is typing a surname
-//! would be a bug that only shows up in use. libcosmic forwards a key press
-//! only when no widget claimed it, so a focused text input already shields
-//! these; the modifier is the second line of defence, not the first.
+//! Modifiers on every character, the same rule Slate follows. This app is
+//! mostly text entry — a search field, and an editor full of name and address
+//! fields — so an unmodified `n` reaching the app while somebody is typing a
+//! surname would be a bug that only shows up in use. libcosmic forwards a key
+//! press only when no widget claimed it, so a focused text input already
+//! shields these; the modifier is the second line of defence, not the first.
 //!
-//! Delete is deliberately absent. A contact list is a list of people, and the
-//! bare Delete key beside a list is how you lose one — the menu item and its
-//! confirmation dialog are the only route.
+//! Delete is the one bare key, as in GNOME Contacts. It types nothing, a
+//! focused field claims it for itself, and a single delete is undoable byte
+//! for byte from its toast while several ticked rows still ask first — so the
+//! key is no easier a way to lose somebody than the menu item.
+//!
+//! Sync now is Ctrl+Shift+R. Slate uses Ctrl+R for its sync, but here Ctrl+R
+//! has always been Refresh (re-read the files on disk), and moving it would
+//! break a habit for a chord the other half of the pair can live beside.
 
 use cosmic::iced::keyboard::Key;
+use cosmic::iced::keyboard::key::Named;
 use cosmic::widget::menu::key_bind::{KeyBind, Modifier};
 use std::collections::HashMap;
 
@@ -51,7 +57,15 @@ pub fn key_binds() -> HashMap<KeyBind, MenuAction> {
     bind!([Ctrl], Key::Character("i".into()), Import);
     bind!([Ctrl, Shift], Key::Character("e".into()), Export);
     bind!([Ctrl], Key::Character("r".into()), Refresh);
+    bind!([Ctrl, Shift], Key::Character("r".into()), SyncNow);
     bind!([Ctrl], Key::Character(",".into()), Settings);
+    key_binds.insert(
+        KeyBind {
+            modifiers: Vec::new(),
+            key: Key::Named(Named::Delete),
+        },
+        MenuAction::Delete,
+    );
 
     key_binds
 }
@@ -71,14 +85,22 @@ mod tests {
         assert_eq!(before, seen.len(), "two actions share one chord");
     }
 
-    /// Every binding carries a modifier — see the module docs.
+    /// Every character binding carries a modifier — see the module docs.
     #[test]
-    fn every_binding_is_modified() {
+    fn every_character_binding_is_modified() {
         for bind in key_binds().keys() {
             assert!(
-                !bind.modifiers.is_empty(),
+                !bind.modifiers.is_empty() || !matches!(bind.key, Key::Character(_)),
                 "{bind:?} would fire while someone is typing a name"
             );
         }
+    }
+
+    /// Delete and Sync now have keys (audit O-03, O-04).
+    #[test]
+    fn delete_and_sync_now_have_keys() {
+        let actions: Vec<MenuAction> = key_binds().into_values().collect();
+        assert!(actions.contains(&MenuAction::Delete));
+        assert!(actions.contains(&MenuAction::SyncNow));
     }
 }

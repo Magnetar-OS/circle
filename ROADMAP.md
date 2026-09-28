@@ -54,7 +54,7 @@ currently unused — the wiring is the work, not the plumbing.
 - Settings section listing accounts from `accounts.toml` (shared with Slate —
   render, don't own; adding/editing an account should be one implementation in
   the substrate/suite, not re-built here).
-- Manual "Sync now" per account and on Ctrl+R; sync status surfaced (spinner
+- Manual "Sync now" per account and on Ctrl+Shift+R; sync status surfaced (spinner
   in the sidebar row, toast on failure with the actual error, never silent).
 - Background sync on an interval from settings, off by default.
 - **Done when:** a Nextcloud account added in Slate syncs contacts from
