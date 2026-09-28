@@ -83,9 +83,9 @@ currently unused — the wiring is the work, not the plumbing.
 - App-level person = links over underlying cards, per-field precedence,
   composed detail view with source indicators; every edit writes to exactly
   one card. Link store as a local-only vdir collection.
-- Duplicate candidates: exact email, E.164-normalised phone
-  (`phonenumber` crate), fuzzy names with transliteration as suggestions
-  only. Review screen defaults to **link**, never auto-merges; destructive
+- Duplicate candidates: exact email, phone by significant trailing digits
+  (not E.164: there is no honest region to normalise against — see
+  `dedupe.rs`), fuzzy names with transliteration as suggestions only. Review screen defaults to **link**, never auto-merges; destructive
   merge is separate, explicit, undoable.
 - **Done when:** the same person from two accounts shows once, edits sync
   back to the right server, and unlinking restores two intact cards.
@@ -172,8 +172,8 @@ launcher plugin). What remains:
 
 ## Track D — Architecture and code quality
 
-- **Split `app.rs` before it hits ecosystem-typical size** (1 475 lines
-  today; convention tolerates ~2 000 with `view.rs` split out). Extract
+- **Split `app.rs`** (about 3 900 lines on 2026-09-29, well past the
+  ~2 000 convention tolerates with `view.rs` split out). Extract
   `view` composition into `src/ui/`; keep `update` a single match, per
   convention.
 - **Tests grow with each Track A item**: linking gets its own round-trip
@@ -182,9 +182,6 @@ launcher plugin). What remains:
   detection gets a transliteration corpus (Γιώργος ↔ Giorgos ↔ George).
 - CI keeps `check-all` green; add `cargo deny` (licences + advisories) and
   the networked `appstreamcli` pass on main.
-- Housekeeping now: `cosmic-pim-sync`/`cosmic-pim-accounts` are unused
-  dependencies until A1 lands — either wire them (A1) or drop them until
-  then; an unused git-path dependency still costs every builder.
 
 ---
 
@@ -283,9 +280,11 @@ write-back — and network avatar fetching stays off by default, if ever.
   are substrate work surfaced here. Circle milestones must not silently
   block on cosmic-pim; when they would, ship the milestone without the item
   and say so in the changelog.
-- **A path dependency makes the sibling's working tree a build input.** The
-  substrate is `path = "../cosmic-pim"` until it is published, and Cargo reads
-  what is *on disk* there, not what is committed. So an uncommitted manifest
+- **A path dependency makes the sibling's working tree a build input.**
+  *(History: the substrate now resolves from crates.io at 1.0.0, so this only
+  applies while the `[patch.crates-io]` block in `Cargo.toml` is uncommented
+  for local work.)* While the substrate was `path = "../cosmic-pim"`, Cargo
+  read what was *on disk* there, not what was committed. So an uncommitted manifest
   edit in cosmic-pim changes Circle's dependency graph without a commit in
   either repository: `Cargo.lock` re-dirties on the next build, and
   `cargo metadata --locked` starts failing at a HEAD nobody touched. It

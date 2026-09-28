@@ -156,8 +156,9 @@ cargo build --release
 ./target/release/circle
 ```
 
-Requires a sibling checkout of `cosmic-pim` — see that repository's README for
-why the dependency is a path rather than a git tag today.
+The substrate (`cosmic-pim-*` 1.0.0) comes from crates.io, so no sibling
+checkout is needed. To build against a local cosmic-pim instead, uncomment
+the `[patch.crates-io]` block at the end of `Cargo.toml`.
 
 Point it at sample data without touching your real address book:
 
