@@ -249,8 +249,10 @@ What the composed view does with two cards:
   made things worse. Numbers collapse across spellings, so `+30 210 1234567`
   and `2101234567` are one row.
 - **The first card wins a scalar.** Organisation, birthday, note: the head's
-  value if it has one, else the next card's. The head is the first card you
-  picked when linking.
+  value if it has one, else the next card's. The head is the topmost of the
+  ticked rows when linking (the first card of the pair in duplicate review);
+  when that card already belongs to a linked person, that person's head
+  stays first.
 - **Every value says where it lives.** A linked person's rows carry their
   book's name, because that is which server an edit to that value would
   reach.

@@ -11,8 +11,8 @@
 //!
 //! - **First card wins a scalar.** Organisation, job title, birthday, note:
 //!   the precedence head's value if it has one, else the next card's. The
-//!   head is the first card in the link record, which is the first card the
-//!   user picked when linking.
+//!   head is the first card in the link record: the topmost ticked row when
+//!   linking, or the first card of a duplicate-review pair.
 //! - **Lists union, and duplicates collapse.** Two cards for one person
 //!   usually share an address or a number — that is how the duplicate finder
 //!   spotted them. Showing it twice would make linking look like it made
