@@ -1006,7 +1006,7 @@ impl AppModel {
         match message {
             Message::LaunchUrl(url) => {
                 if let Err(why) = open::that_detached(&url) {
-                    tracing::warn!(url, %why, "could not open the link");
+                    return self.toast(format!("{url}: {why}"));
                 }
             }
             Message::ToggleContextPage(page) => {
@@ -2321,6 +2321,7 @@ impl AppModel {
         let mut removed = Vec::new();
         let mut label = String::new();
         let mut first_error: Option<String> = None;
+        let mut side_error: Option<String> = None;
         for key in &keys {
             let Some(contact) = store.contact(&key.book, &key.uid) else {
                 continue;
@@ -2335,9 +2336,11 @@ impl AppModel {
                 });
                 continue;
             }
+            // Reported beside the undo toast, not instead of it: the card is
+            // already gone locally and must stay undoable.
             if let Err(why) = queue_card_removal(store, &key.book, &contact.file_name, &contact.raw)
             {
-                first_error.get_or_insert(why);
+                side_error.get_or_insert(why);
             }
             self.photos.remove(key);
             label = contact.label();
@@ -2347,7 +2350,7 @@ impl AppModel {
             };
             let crm = self.crm.record(&card).cloned();
             if let Err(why) = self.crm.forget(&card) {
-                tracing::warn!(%why, "could not remove the notes for a deleted contact");
+                side_error.get_or_insert(why);
             }
             removed.push(DeletedCard {
                 book: key.book.clone(),
@@ -2368,11 +2371,12 @@ impl AppModel {
         self.rebuild_nav();
         self.reload();
 
-        if let Some(why) = first_error {
-            return self.toast(why);
-        }
+        // Whatever failed is reported, but never instead of the undo toast:
+        // the cards that were removed must stay recoverable even when one of
+        // a batch could not be deleted.
+        let error = first_error.or(side_error);
         if removed.is_empty() {
-            return Task::none();
+            return error.map_or_else(Task::none, |why| self.toast(why));
         }
 
         let message =
@@ -2402,12 +2406,17 @@ impl AppModel {
             let oldest = *self.undo.keys().next().unwrap_or(&token);
             self.undo.remove(&oldest);
         }
-        self.toasts
+        let undo = self
+            .toasts
             .push(
                 widget::Toast::new(message)
                     .action(fl!("undo"), move |_| Message::UndoDelete(token)),
             )
-            .map(Into::into)
+            .map(Into::into);
+        match error {
+            Some(why) => Task::batch([undo, self.toast(why)]),
+            None => undo,
+        }
     }
 
     /// Puts a deletion's cards back, byte for byte, and re-queues them for
@@ -2447,7 +2456,7 @@ impl AppModel {
                             uid: card.uid.clone(),
                         };
                         if let Err(why) = self.crm.restore(&card, record) {
-                            tracing::warn!(%why, "could not put back the notes for an undone delete");
+                            first_error.get_or_insert(why);
                         }
                     }
                 }

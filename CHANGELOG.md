@@ -73,6 +73,10 @@ All notable changes to this project are documented here. The format follows
   written. The editor's label menu is translated too.
 - A change that was saved but could not be queued for upload says so. It
   stayed on this device without a word, and the server kept its copy.
+- When one contact of several could not be deleted, the others that were
+  deleted can still be undone; the Undo used to be dropped along with the
+  error. Notes that could not be removed with a deleted contact, or put back
+  by Undo, and a link that could not be opened, now say so.
 - Exporting with every address book hidden says so, instead of claiming
   there is no address book that can be written to.
 - An attachment whose stored copy was cut short by a crash is repaired the
