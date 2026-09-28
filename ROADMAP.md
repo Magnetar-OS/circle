@@ -164,7 +164,8 @@ launcher plugin). What remains:
 - **Peripheral apps:** birthdays feed Slate via substrate BDAY synthesis
   (substrate item, tracked here); `mailto:` compose prefers Envelope when it
   can receive one; launcher plugin stays in lockstep with app features
-  (groups and linked persons should be searchable from `con` too).
+  (linked persons fold to one result, as in the list; groups are not yet
+  searchable from `con`).
 - **Packaging:** `debian/`, Flatpak manifest, `flake.nix`,
   `hooks/pre-commit.hook` — the artefacts that arrive "when packaging
   starts"; that time is milestone 1.0. `just vendor` must keep working.

@@ -159,12 +159,9 @@ impl Plugin {
         // Pick up anything synced since the last query.
         store.refresh();
 
-        let mut matches: Vec<Contact> = store
-            .search(&needle)
-            .into_iter()
-            .filter(|c| !self.config.is_hidden(&c.addressbook_id))
-            .collect();
-        matches.truncate(MAX_RESULTS);
+        // Re-read too: linking happens in the app while this plugin runs.
+        let links = circle::links::LinkStore::open(store.root());
+        let matches = matching(store, &self.config, &links, &needle);
 
         for (id, contact) in matches.iter().enumerate() {
             send(&append_message(id, contact));
@@ -287,6 +284,25 @@ fn copy_to_clipboard(value: &str) {
     }
 }
 
+/// The results for one query: visible books only, one row per linked
+/// person — the app's list shows Ada once, and so does the launcher — capped
+/// at [`MAX_RESULTS`] after folding so a person does not use up two slots.
+fn matching(
+    store: &ContactStore,
+    config: &Config,
+    links: &circle::links::LinkStore,
+    needle: &str,
+) -> Vec<Contact> {
+    let found: Vec<Contact> = store
+        .search(needle)
+        .into_iter()
+        .filter(|c| !config.is_hidden(&c.addressbook_id))
+        .collect();
+    let mut rows = links.fold(found).rows;
+    rows.truncate(MAX_RESULTS);
+    rows
+}
+
 /// The command line that opens one contact in Circle.
 ///
 /// The label is other people's data — it arrives from whatever a CardDAV
@@ -365,6 +381,60 @@ fn load_config() -> Config {
 mod tests {
     use super::*;
     use pop_launcher::PluginResponse;
+
+    /// Ada has a card in two books and they are linked: the launcher offers
+    /// her once, as the app's list does (ROADMAP Track C).
+    #[test]
+    fn a_linked_person_is_one_result() {
+        use circle::links::{CardRef, LinkStore};
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        for (name, uid) in [("Home", "a"), ("Work", "b")] {
+            let book = store
+                .create_book(name, cosmic_pim_core::model::Rgb(1, 2, 3))
+                .unwrap();
+            write_contact_raw(
+                &book,
+                "ada.vcf",
+                &format!(
+                    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{uid}\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n"
+                ),
+            )
+            .unwrap();
+        }
+        store.refresh();
+        let books = store.books().to_vec();
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![
+                CardRef {
+                    book: books[0].id.clone(),
+                    uid: store
+                        .contacts()
+                        .iter()
+                        .find(|c| c.addressbook_id == books[0].id)
+                        .unwrap()
+                        .uid
+                        .clone(),
+                },
+                CardRef {
+                    book: books[1].id.clone(),
+                    uid: store
+                        .contacts()
+                        .iter()
+                        .find(|c| c.addressbook_id == books[1].id)
+                        .unwrap()
+                        .uid
+                        .clone(),
+                },
+            ])
+            .unwrap();
+
+        let found = matching(&store, &Config::default(), &links, "ada");
+        assert_eq!(found.len(), 1, "one person listed twice");
+    }
 
     /// Every message this plugin sends, read back by the types pop-launcher
     /// itself deserialises into.

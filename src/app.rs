@@ -2133,52 +2133,33 @@ impl AppModel {
     /// others move to `folded`, where the detail pane composes them back in.
     fn fold_links(&mut self) {
         self.folded.clear();
-        if self.links.persons().is_empty() {
-            return;
-        }
-
-        // Head per person: first card in record order that is actually here.
-        let mut heads: HashMap<String, ContactKey> = HashMap::new();
-        for person in self.links.persons() {
-            if let Some(card) = person.cards.iter().find(|card| {
-                self.contacts
-                    .iter()
-                    .any(|c| c.addressbook_id == card.book && c.uid == card.uid)
-            }) {
-                heads.insert(
-                    person.id.clone(),
+        let folded = self.links.fold(std::mem::take(&mut self.contacts));
+        self.contacts = folded.rows;
+        self.folded = folded
+            .members
+            .into_iter()
+            .map(|(head, cards)| {
+                (
                     ContactKey {
-                        book: card.book.clone(),
-                        uid: card.uid.clone(),
+                        book: head.book,
+                        uid: head.uid,
                     },
-                );
-            }
-        }
-
-        let mut kept = Vec::with_capacity(self.contacts.len());
-        for contact in std::mem::take(&mut self.contacts) {
-            let key = ContactKey::of(&contact);
-            let head = self
-                .links
-                .person_of(&key.book, &key.uid)
-                .and_then(|person| heads.get(&person.id));
-            match head {
-                Some(head) if *head != key => {
-                    self.folded.entry(head.clone()).or_default().push(contact);
-                }
-                _ => kept.push(contact),
-            }
-        }
-        self.contacts = kept;
+                    cards,
+                )
+            })
+            .collect();
 
         // A selection that just became a folded member follows its head,
         // rather than leaving the detail pane empty.
         if let Some(selected) = self.selected.clone()
             && !self.contacts.iter().any(|c| selected.matches(c))
-            && let Some(person) = self.links.person_of(&selected.book, &selected.uid)
-            && let Some(head) = heads.get(&person.id)
+            && let Some(head) = self
+                .folded
+                .iter()
+                .find(|(_, cards)| cards.iter().any(|c| selected.matches(c)))
+                .map(|(head, _)| head.clone())
         {
-            self.selected = Some(head.clone());
+            self.selected = Some(head);
         }
     }
 

@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The launcher lists a linked person once, as the contact list does, instead
+  of once per card.
 - Rebuilt against the current COSMIC libraries (libcosmic `03d7dcb`).
 
 ### Fixed

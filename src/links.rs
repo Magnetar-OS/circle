@@ -18,6 +18,8 @@
 
 use std::path::{Path, PathBuf};
 
+use cosmic_pim_core::model::Contact;
+
 /// One underlying card, by its coordinates.
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
@@ -40,6 +42,14 @@ pub struct Person {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 struct Ignored {
     pairs: Vec<(CardRef, CardRef)>,
+}
+
+/// [`LinkStore::fold`]'s result: the rows to show, and each head's other
+/// cards.
+#[derive(Debug, Default)]
+pub struct Folded {
+    pub rows: Vec<Contact>,
+    pub members: std::collections::HashMap<CardRef, Vec<Contact>>,
 }
 
 pub struct LinkStore {
@@ -109,6 +119,53 @@ impl LinkStore {
         self.persons
             .iter()
             .find(|p| p.cards.iter().any(|c| c.book == book && c.uid == uid))
+    }
+
+    /// One row per person: every linked card present in `contacts` folds
+    /// under its person's head, which is the first card in the person's
+    /// record order that is present. Unlinked cards pass through. Rows keep
+    /// their input order; the folded cards are returned keyed by their head.
+    #[must_use]
+    pub fn fold(&self, contacts: Vec<Contact>) -> Folded {
+        let mut folded = Folded::default();
+        if self.persons.is_empty() {
+            folded.rows = contacts;
+            return folded;
+        }
+        let present = |card: &CardRef| {
+            contacts
+                .iter()
+                .any(|c| c.addressbook_id == card.book && c.uid == card.uid)
+        };
+        let heads: std::collections::HashMap<&str, CardRef> = self
+            .persons
+            .iter()
+            .filter_map(|person| {
+                let head = person.cards.iter().find(|card| present(card))?;
+                Some((person.id.as_str(), head.clone()))
+            })
+            .collect();
+
+        for contact in contacts {
+            let card = CardRef {
+                book: contact.addressbook_id.clone(),
+                uid: contact.uid.clone(),
+            };
+            let head = self
+                .person_of(&card.book, &card.uid)
+                .and_then(|person| heads.get(person.id.as_str()));
+            match head {
+                Some(head) if *head != card => {
+                    folded
+                        .members
+                        .entry(head.clone())
+                        .or_default()
+                        .push(contact);
+                }
+                _ => folded.rows.push(contact),
+            }
+        }
+        folded
     }
 
     /// Links the given cards into one person, merging any persons they
@@ -386,6 +443,36 @@ mod tests {
 
         assert!(links.unlink("work", "b").is_err());
         assert_eq!(links.persons().len(), 1, "memory moved ahead of the disk");
+    }
+
+    fn contact(book: &str, uid: &str) -> Contact {
+        let mut c = Contact::draft(book);
+        c.uid = uid.to_owned();
+        c
+    }
+
+    /// A linked person is one row, headed by the first card in record order
+    /// that is present — so a filter that hides the head promotes the next.
+    #[test]
+    fn folding_leaves_one_row_per_person() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![card("personal", "a"), card("work", "b")])
+            .unwrap();
+
+        let all = links.fold(vec![
+            contact("work", "b"),
+            contact("personal", "a"),
+            contact("personal", "c"),
+        ]);
+        let rows: Vec<&str> = all.rows.iter().map(|c| c.uid.as_str()).collect();
+        assert_eq!(rows, ["a", "c"]);
+        assert_eq!(all.members[&card("personal", "a")][0].uid, "b");
+
+        let without_head = links.fold(vec![contact("work", "b")]);
+        assert_eq!(without_head.rows.len(), 1);
+        assert!(without_head.members.is_empty());
     }
 
     #[test]
