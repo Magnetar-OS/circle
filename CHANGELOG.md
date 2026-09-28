@@ -56,6 +56,9 @@ All notable changes to this project are documented here. The format follows
 - Deleting one contact from a file that holds several, in a synced address
   book, uploads the file with the others still in it. It used to delete the
   whole file from the server, taking everybody else in it along.
+- Deleting a linked person's row says which card went. Only the card the row
+  stands on is deleted, as with editing; the toast used to say the person
+  was deleted while they stayed in the list on their other card.
 - An attachment whose stored copy was cut short by a crash is repaired the
   next time the same file is attached, and attachments are now stored
   crash-safely.

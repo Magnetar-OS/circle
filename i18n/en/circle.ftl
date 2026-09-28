@@ -228,6 +228,7 @@ add-to-group-body =
 added-to-group = Added { $count } to { $name }.
 confirm-delete-many-title = Delete { $count } contacts?
 deleted-one = Deleted { $name }.
+deleted-one-card = Deleted { $name }'s card in { $book }. Their other cards are still here.
 deleted-many = Deleted { $count } contacts.
 
 ## Linking and duplicates

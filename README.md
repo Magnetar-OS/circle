@@ -257,7 +257,9 @@ What the composed view does with two cards:
 
 Editing a linked person edits **one** card — the head — and the editor says
 which book that is. Values belonging to another card are edited by unlinking,
-or by selecting that card in its own book.
+or by selecting that card in its own book. Deleting follows the same rule:
+the head card goes, the undo toast names its book, and the person stays in
+the list on their remaining cards.
 
 ## Notes and keeping in touch
 

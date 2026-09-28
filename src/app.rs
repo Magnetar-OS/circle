@@ -2379,11 +2379,26 @@ impl AppModel {
             return Task::none();
         }
 
-        let message = if removed.len() == 1 {
-            fl!("deleted-one", name = label)
-        } else {
-            fl!("deleted-many", count = removed.len())
-        };
+        let message =
+            if let [card] = removed.as_slice() {
+                // A linked person's row deletes the card it stands on — the same
+                // one-card rule as editing. Saying "Deleted Ada" while Ada stays
+                // in the list on her other card would be a lie.
+                match self.store.as_ref().filter(|store| {
+                    has_linked_cards_left(&self.links, store, &card.book, &card.uid)
+                }) {
+                    Some(store) => fl!(
+                        "deleted-one-card",
+                        name = label,
+                        book = store
+                            .book(&card.book)
+                            .map_or_else(|| card.book.clone(), |b| b.name.clone())
+                    ),
+                    None => fl!("deleted-one", name = label),
+                }
+            } else {
+                fl!("deleted-many", count = removed.len())
+            };
         self.undo_seq += 1;
         let token = self.undo_seq;
         self.undo.insert(token, removed);
@@ -3282,6 +3297,23 @@ fn queue_removal(store: &ContactStore, book_id: &str, file_name: &str) {
     }
 }
 
+/// Whether the card at `(book, uid)` belongs to a linked person who still
+/// has another card in the address book — so deleting it did not delete them.
+fn has_linked_cards_left(
+    links: &crate::links::LinkStore,
+    store: &ContactStore,
+    book: &str,
+    uid: &str,
+) -> bool {
+    links.person_of(book, uid).is_some_and(|person| {
+        person
+            .cards
+            .iter()
+            .filter(|c| !(c.book == book && c.uid == uid))
+            .any(|c| store.contact(&c.book, &c.uid).is_some())
+    })
+}
+
 /// Queues the server side of deleting one card from `file_name`.
 ///
 /// The resource on the server is the file. When the card was the whole file
@@ -3746,6 +3778,53 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         let pending = VdirStore::open(book).unwrap().pending();
         assert_eq!(pending.len(), 1);
         assert!(matches!(pending[0].op, PushOp::Delete { .. }));
+    }
+
+    /// Deleting the card a linked person's row stands on leaves the person
+    /// in the list on their other card; the undo toast has to say so.
+    #[test]
+    fn a_linked_person_with_another_card_is_not_reported_as_deleted() {
+        use crate::links::{CardRef, LinkStore};
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let home = store
+            .create_book("Home", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        let work = store
+            .create_book("Work", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        write_contact_raw(
+            &home,
+            "ada.vcf",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:a\r\nFN:Ada\r\nEND:VCARD\r\n",
+        )
+        .unwrap();
+        write_contact_raw(
+            &work,
+            "ada.vcf",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:b\r\nFN:Ada\r\nEND:VCARD\r\n",
+        )
+        .unwrap();
+        store.refresh();
+        let mut links = LinkStore::open(dir.path());
+        let card = |book: &str, uid: &str| CardRef {
+            book: book.to_owned(),
+            uid: uid.to_owned(),
+        };
+        links
+            .link(vec![card(&home.id, "a"), card(&work.id, "b")])
+            .unwrap();
+
+        store.delete(&home.id, "a").unwrap();
+        assert!(has_linked_cards_left(&links, &store, &home.id, "a"));
+
+        store.delete(&work.id, "b").unwrap();
+        assert!(
+            !has_linked_cards_left(&links, &store, &work.id, "b"),
+            "the last card of a person is the person"
+        );
     }
 
     /// A PNG of the given size, for the photo-processing tests.

@@ -233,6 +233,7 @@ add-to-group-body =
 added-to-group = Προστέθηκαν { $count } στο { $name }.
 confirm-delete-many-title = Διαγραφή { $count } επαφών;
 deleted-one = Διαγράφηκε το { $name }.
+deleted-one-card = Διαγράφηκε η κάρτα του/της { $name } στο { $book }. Οι άλλες κάρτες παραμένουν.
 deleted-many = Διαγράφηκαν { $count } επαφές.
 
 ## Σύνδεση και διπλότυπα
