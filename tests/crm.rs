@@ -447,7 +447,8 @@ fn nothing_local_is_visible_to_the_store_or_the_push_queue() {
     //    this still leak, which is why it is asserted separately.
     let pending = VdirStore::open(book.clone())
         .expect("open vdir store")
-        .pending();
+        .pending()
+        .expect("read the queue");
     for entry in &pending {
         for secret in secrets {
             assert!(

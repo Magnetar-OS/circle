@@ -199,6 +199,17 @@ no-accounts-description =
     shared with Slate — an account added there is already here.
 sync-now = Sync now
 syncing = Syncing…
+sync-line = { $account }: { $details }
+sync-up-to-date = up to date
+sync-fetched = { $count } received
+sync-deleted = { $count } removed
+sync-pushed = { $count } sent
+sync-failed = { $count ->
+        [one] one address book or calendar failed
+       *[other] { $count } address books or calendars failed
+    }
+sync-conflicts = { $count } to resolve
+sync-held = { $count } waiting on you
 sync-contacts-unreachable = address books not reached: { $why }
 sync-needs-attention = Contacts sync needs you: { $accounts }
 error-queue-upload = Saved here, but not queued for upload, so the server keeps its copy until this contact is saved again: { $why }

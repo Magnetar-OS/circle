@@ -640,7 +640,8 @@ fn a_queued_edit_carries_its_pre_edit_base_and_the_first_base_sticks() {
 
     let pending = VdirStore::open(fixture.book.clone())
         .expect("reopen")
-        .pending();
+        .pending()
+        .expect("read the queue");
     assert_eq!(pending.len(), 1, "one entry per href, reset not appended");
     assert_eq!(
         pending[0].base.as_deref(),

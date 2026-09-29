@@ -5,7 +5,7 @@
 
 use circle::conflicts::{self, Resolution, ResolveError};
 use cosmic_pim_caldav::push::PushQueue as _;
-use cosmic_pim_caldav::{CalDavStore as _, Conflict, RemoteEvent, VdirStore};
+use cosmic_pim_caldav::{CalDavStore as _, Conflict, ConflictKind, RemoteEvent, VdirStore};
 use cosmic_pim_core::merge::Side;
 use cosmic_pim_core::model::Rgb;
 use cosmic_pim_core::store::vdir;
@@ -36,6 +36,7 @@ fn conflicted(local: &str, remote: &str) -> (tempfile::TempDir, String) {
     store
         .record_conflict(&Conflict {
             href: HREF.into(),
+            kind: ConflictKind::BothEdited,
             local: local.into(),
             remote: remote.into(),
             remote_etag: "\"v2\"".into(),
@@ -54,7 +55,7 @@ fn push_is_live(root: &Path, id: &str) -> bool {
         .into_iter()
         .find(|m| m.id == id)
         .unwrap();
-    let pending = VdirStore::open(meta).unwrap().pending();
+    let pending = VdirStore::open(meta).unwrap().pending().unwrap();
     pending.len() == 1 && !pending[0].blocked
 }
 

@@ -156,7 +156,7 @@ cargo build --release
 ./target/release/circle
 ```
 
-The substrate (`cosmic-pim-*` 1.0.0) comes from crates.io, so no sibling
+The substrate (`cosmic-pim-*` 2) comes from crates.io, so no sibling
 checkout is needed. To build against a local cosmic-pim instead, uncomment
 the `[patch.crates-io]` block at the end of `Cargo.toml`.
 

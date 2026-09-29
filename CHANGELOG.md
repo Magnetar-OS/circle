@@ -23,6 +23,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Built on cosmic-pim 2. The account status line on the Accounts page is
+  translated (it was always English), and Circle no longer builds or ships
+  the mail and OpenPGP libraries it never used.
 - Delete deletes the selected contact (with the same Undo), and Ctrl+Shift+R
   syncs now. Ctrl+R stays Refresh.
 - The launcher lists a linked person once, as the contact list does, instead

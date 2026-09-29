@@ -204,6 +204,17 @@ no-accounts-description =
     λογαριασμός που προστέθηκε εκεί βρίσκεται ήδη εδώ.
 sync-now = Συγχρονισμός τώρα
 syncing = Συγχρονισμός…
+sync-line = { $account }: { $details }
+sync-up-to-date = ενημερωμένο
+sync-fetched = { $count } ελήφθησαν
+sync-deleted = { $count } αφαιρέθηκαν
+sync-pushed = { $count } στάλθηκαν
+sync-failed = { $count ->
+        [one] ένα ευρετήριο ή ημερολόγιο απέτυχε
+       *[other] { $count } ευρετήρια ή ημερολόγια απέτυχαν
+    }
+sync-conflicts = { $count } προς επίλυση
+sync-held = { $count } περιμένουν εσάς
 sync-contacts-unreachable = τα ευρετήρια δεν ήταν προσβάσιμα: { $why }
 sync-needs-attention = Ο συγχρονισμός επαφών χρειάζεται την προσοχή σας: { $accounts }
 error-queue-upload = Αποθηκεύτηκε εδώ, αλλά δεν μπήκε στην ουρά αποστολής, οπότε ο διακομιστής κρατά το δικό του αντίγραφο μέχρι να αποθηκευτεί ξανά η επαφή: { $why }

@@ -3391,7 +3391,10 @@ pub struct SyncSummary {
 impl SyncSummary {
     fn of(reports: &[cosmic_pim_sync::AccountReport]) -> Self {
         Self {
-            lines: reports.iter().map(sync_line).collect(),
+            lines: reports
+                .iter()
+                .map(|r| status_line(&r.display_name, &r.tally()))
+                .collect(),
             changed: reports.iter().any(cosmic_pim_sync::AccountReport::changed),
             attention: reports
                 .iter()
@@ -3431,21 +3434,43 @@ fn contacts_need_attention(report: &cosmic_pim_sync::AccountReport) -> bool {
     }
 }
 
-/// One account's line on the Accounts page after a sync pass.
+/// One account's line on the Accounts page after a sync pass, worded from
+/// the substrate's [`cosmic_pim_sync::SyncTally`] in the interface language.
 ///
-/// The substrate's summary counts the collections that were reached, so an
-/// account whose CardDAV side refused us reads "up to date" on the strength
-/// of its calendars. That is the one failure a contacts app exists to show,
-/// and the report carries it separately; it is appended here.
-fn sync_line(report: &cosmic_pim_sync::AccountReport) -> String {
-    let summary = report.summary();
-    match &report.contacts_unavailable {
-        Some(why) => format!(
-            "{summary}; {}",
-            fl!("sync-contacts-unreachable", why = why.clone())
-        ),
-        None => summary,
+/// The address-book half is part of the tally, so an account whose CardDAV
+/// side refused us never reads "up to date" on the strength of its
+/// calendars.
+fn status_line(account: &str, tally: &cosmic_pim_sync::SyncTally) -> String {
+    if let Some(why) = &tally.account_error {
+        return fl!("sync-line", account = account, details = why.clone());
     }
+    let mut parts = Vec::new();
+    for (count, id) in [
+        (tally.fetched, "sync-fetched"),
+        (tally.deleted, "sync-deleted"),
+        (tally.pushed, "sync-pushed"),
+        (tally.failed, "sync-failed"),
+        (tally.conflicts, "sync-conflicts"),
+        (tally.held, "sync-held"),
+    ] {
+        if count > 0 {
+            parts.push(match id {
+                "sync-fetched" => fl!("sync-fetched", count = count),
+                "sync-deleted" => fl!("sync-deleted", count = count),
+                "sync-pushed" => fl!("sync-pushed", count = count),
+                "sync-failed" => fl!("sync-failed", count = count),
+                "sync-conflicts" => fl!("sync-conflicts", count = count),
+                _ => fl!("sync-held", count = count),
+            });
+        }
+    }
+    if let Some(why) = &tally.contacts_unavailable {
+        parts.push(fl!("sync-contacts-unreachable", why = why.clone()));
+    }
+    if parts.is_empty() {
+        parts.push(fl!("sync-up-to-date"));
+    }
+    fl!("sync-line", account = account, details = parts.join(", "))
 }
 
 /// Whether an `http://` URL points at this machine — the one case where
@@ -3649,35 +3674,41 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
     }
 
     /// An account whose calendars synced but whose address books could not be
-    /// reached. The substrate's summary counts collections only, so it reads
-    /// "up to date" — in the contacts app, about the one account whose
-    /// contacts did not sync at all.
+    /// reached must not read "up to date": in the contacts app, that is the
+    /// one account whose contacts did not sync at all.
     #[test]
     fn an_account_whose_address_books_were_not_reached_says_so() {
-        let report = cosmic_pim_sync::AccountReport {
-            account_id: "acct".to_owned(),
-            display_name: "Fastmail".to_owned(),
-            collections: Ok(Vec::new()),
+        let tally = cosmic_pim_sync::SyncTally {
             contacts_unavailable: Some("HTTP 401 Unauthorized".to_owned()),
+            ..Default::default()
         };
-        let line = sync_line(&report);
-        assert!(line.starts_with("Fastmail"), "{line}");
-        assert!(
-            line.contains("HTTP 401 Unauthorized"),
-            "the address-book failure is missing from the status line: {line}"
-        );
+        let line = status_line("Fastmail", &tally);
+        assert!(line.contains("Fastmail"), "{line}");
+        assert!(line.contains("HTTP 401 Unauthorized"), "{line}");
+        assert!(!line.contains(&fl!("sync-up-to-date")), "{line}");
     }
 
-    /// The ordinary case adds nothing to the substrate's summary.
+    /// Each count is worded from the catalogue, and a quiet pass says so.
     #[test]
-    fn an_account_whose_address_books_synced_reads_as_the_summary() {
-        let report = cosmic_pim_sync::AccountReport {
-            account_id: "acct".to_owned(),
-            display_name: "Fastmail".to_owned(),
-            collections: Ok(Vec::new()),
-            contacts_unavailable: None,
+    fn the_status_line_is_worded_from_the_catalogue() {
+        let quiet = status_line("Fastmail", &cosmic_pim_sync::SyncTally::default());
+        assert!(quiet.contains(&fl!("sync-up-to-date")), "{quiet}");
+
+        let busy = cosmic_pim_sync::SyncTally {
+            fetched: 3,
+            conflicts: 1,
+            ..Default::default()
         };
-        assert_eq!(sync_line(&report), report.summary());
+        let line = status_line("Fastmail", &busy);
+        assert!(line.contains(&fl!("sync-fetched", count = 3)), "{line}");
+        assert!(line.contains(&fl!("sync-conflicts", count = 1)), "{line}");
+        assert!(!line.contains(&fl!("sync-up-to-date")), "{line}");
+
+        let failed = cosmic_pim_sync::SyncTally {
+            account_error: Some("host is down".to_owned()),
+            ..Default::default()
+        };
+        assert!(status_line("Fastmail", &failed).contains("host is down"));
     }
 
     fn account(
@@ -3784,7 +3815,7 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         store.delete(&book.id, "ada").unwrap();
         queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
 
-        let pending = VdirStore::open(book).unwrap().pending();
+        let pending = VdirStore::open(book).unwrap().pending().unwrap();
         assert_eq!(pending.len(), 1);
         assert!(
             matches!(pending[0].op, PushOp::Put { .. }),
@@ -3819,7 +3850,7 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         store.delete(&book.id, "ada").unwrap();
         queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
 
-        let pending = VdirStore::open(book).unwrap().pending();
+        let pending = VdirStore::open(book).unwrap().pending().unwrap();
         assert_eq!(pending.len(), 1);
         assert!(matches!(pending[0].op, PushOp::Delete { .. }));
     }

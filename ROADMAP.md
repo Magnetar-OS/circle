@@ -281,7 +281,7 @@ write-back — and network avatar fetching stays off by default, if ever.
   block on cosmic-pim; when they would, ship the milestone without the item
   and say so in the changelog.
 - **A path dependency makes the sibling's working tree a build input.**
-  *(History: the substrate now resolves from crates.io at 1.0.0, so this only
+  *(History: the substrate now resolves from crates.io (version 2), so this only
   applies while the `[patch.crates-io]` block in `Cargo.toml` is uncommented
   for local work.)* While the substrate was `path = "../cosmic-pim"`, Cargo
   read what was *on disk* there, not what was committed. So an uncommitted manifest
