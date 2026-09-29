@@ -147,3 +147,111 @@ fn a_disputed_property_is_merged_from_the_side_chosen() {
     assert!(merged.contains("EMAIL:ada@analytical.org"), "{merged}");
     assert!(conflicts::load(dir.path()).is_empty());
 }
+
+/// A synced card with a conflict of the given deletion kind recorded
+/// against it, the way the substrate records one.
+fn deletion_conflict(kind: ConflictKind) -> (tempfile::TempDir, String) {
+    let edited = BASE.replace("TEL:+44 20 1111", "TEL:+44 20 2222");
+    let dir = tempfile::tempdir().unwrap();
+    let meta = vdir::create_collection(dir.path(), "Personal", Rgb(1, 2, 3)).unwrap();
+    let id = meta.id.clone();
+    let mut store = VdirStore::open_carddav(meta).unwrap();
+    store.set_remote("/dav/ab/", false).unwrap();
+    store
+        .upsert(&RemoteEvent {
+            href: HREF.into(),
+            etag: "\"v1\"".into(),
+            ics: BASE.into(),
+        })
+        .unwrap();
+    let file = store.collection().path.join("ada.vcf");
+    let (local, remote) = match kind {
+        ConflictKind::DeletedOnServer => {
+            std::fs::write(&file, &edited).unwrap();
+            store.queue_put_with_base(HREF, Some(BASE)).unwrap();
+            (edited, String::new())
+        }
+        ConflictKind::DeletedHere => {
+            std::fs::remove_file(&file).unwrap();
+            store.queue_delete(HREF).unwrap();
+            (String::new(), edited)
+        }
+        ConflictKind::BothEdited => unreachable!("see conflicted()"),
+    };
+    store
+        .record_conflict(&Conflict {
+            href: HREF.into(),
+            kind,
+            local,
+            remote,
+            remote_etag: "\"v2\"".into(),
+            base: Some(BASE.into()),
+        })
+        .unwrap();
+    (dir, id)
+}
+
+/// Each kind is worded for what its buttons do; the same "Keep mine" on a
+/// card deleted here would delete it on the server without saying so.
+#[test]
+fn each_kind_of_conflict_is_worded_for_what_it_does() {
+    let local = BASE.replace("FN:Ada Lovelace", "FN:Ada King");
+    let (both, _) = conflicted(&local, BASE);
+    let (on_server, _) = deletion_conflict(ConflictKind::DeletedOnServer);
+    let (here, _) = deletion_conflict(ConflictKind::DeletedHere);
+
+    let words: Vec<conflicts::Wording> = [&both, &on_server, &here]
+        .iter()
+        .map(|dir| conflicts::wording(&conflicts::load(dir.path())[0]))
+        .collect();
+
+    for (i, a) in words.iter().enumerate() {
+        for b in &words[i + 1..] {
+            assert_ne!(a.summary, b.summary);
+            assert_ne!(a.keep_mine, b.keep_mine);
+            assert_ne!(a.take_theirs, b.take_theirs);
+        }
+    }
+    // A deletion names the card from the side that still has it.
+    assert!(
+        words[1].summary.contains("Ada Lovelace"),
+        "{}",
+        words[1].summary
+    );
+    assert!(
+        words[2].summary.contains("Ada Lovelace"),
+        "{}",
+        words[2].summary
+    );
+}
+
+/// A deletion on one side leaves nothing to merge property by property.
+#[test]
+fn a_deletion_conflict_offers_no_merge() {
+    let (dir, _) = deletion_conflict(ConflictKind::DeletedOnServer);
+    assert!(conflicts::load(dir.path())[0].disputes.is_none());
+}
+
+/// "Delete here too" on a card the server deleted removes it here.
+#[test]
+fn taking_the_servers_deletion_deletes_the_card_here() {
+    let (dir, id) = deletion_conflict(ConflictKind::DeletedOnServer);
+    let row = conflicts::load(dir.path()).remove(0);
+
+    conflicts::resolve(dir.path(), &row, Resolution::TakeTheirs).unwrap();
+
+    assert!(!dir.path().join(&id).join("ada.vcf").exists());
+    assert!(conflicts::load(dir.path()).is_empty());
+}
+
+/// "Restore server's" on a card deleted here brings the server's copy back.
+#[test]
+fn restoring_the_servers_copy_undoes_the_local_deletion() {
+    let (dir, id) = deletion_conflict(ConflictKind::DeletedHere);
+    let row = conflicts::load(dir.path()).remove(0);
+
+    conflicts::resolve(dir.path(), &row, Resolution::TakeTheirs).unwrap();
+
+    assert!(card(dir.path(), &id).contains("TEL:+44 20 2222"));
+    assert!(conflicts::load(dir.path()).is_empty());
+}

@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows
   or — when the two edits touch different fields — merge both. When both
   sides changed the same field, pick a side for each such field and every
   other field keeps both edits.
+  A contact deleted on one side and changed on the other is described as
+  such, with buttons that say what they do — "Delete here too", "Restore
+  server's" — instead of "Keep mine" and "Take server's".
 - A sync pass that leaves your contacts needing you — an account that failed,
   address books that refused the sign-in, a conflict to decide — says so in
   a notification with a button to the Accounts page, instead of only on that

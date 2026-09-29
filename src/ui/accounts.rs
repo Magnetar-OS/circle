@@ -118,25 +118,22 @@ fn conflicts_section(conflicts: &[ConflictRow]) -> Element<'_, Message> {
 fn conflict_card(index: usize, row: &ConflictRow) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
 
+    let words = crate::conflicts::wording(row);
     let mut section = widget::settings::section().add(
-        widget::settings::item::builder(fl!(
-            "conflict-versions",
-            yours = row.yours.clone(),
-            theirs = row.theirs.clone()
-        ))
-        .description(row.book_name.clone())
-        .control(
-            widget::row::with_capacity(2)
-                .spacing(spacing.space_xxs)
-                .push(
-                    widget::button::text(fl!("conflict-keep-mine"))
-                        .on_press(Message::ConflictResolve(index, Resolution::KeepMine)),
-                )
-                .push(
-                    widget::button::text(fl!("conflict-take-theirs"))
-                        .on_press(Message::ConflictResolve(index, Resolution::TakeTheirs)),
-                ),
-        ),
+        widget::settings::item::builder(words.summary)
+            .description(row.book_name.clone())
+            .control(
+                widget::row::with_capacity(2)
+                    .spacing(spacing.space_xxs)
+                    .push(
+                        widget::button::text(words.keep_mine)
+                            .on_press(Message::ConflictResolve(index, Resolution::KeepMine)),
+                    )
+                    .push(
+                        widget::button::text(words.take_theirs)
+                            .on_press(Message::ConflictResolve(index, Resolution::TakeTheirs)),
+                    ),
+            ),
     );
 
     let Some(disputes) = &row.disputes else {

@@ -11,6 +11,12 @@
 //! - **Keep mine**: this device's card wins and is re-queued for upload.
 //! - **Take the server's**: the server's card is written locally and the
 //!   parked push is dropped.
+//!
+//! One side may be a deletion rather than an edit ([`ConflictKind`]): the
+//! server deleted a card this device changed, or this device deleted a card
+//! the server changed. The same two answers apply — the substrate does the
+//! right thing for each kind — but they mean different things to the person
+//! choosing, so each kind is worded for what the buttons will actually do.
 //! - **Merge**: when the sync pass kept the revision both sides started from,
 //!   [`cosmic_pim_core::merge`] lists the properties both sides changed; the
 //!   user picks a side for each and every other property keeps both edits.
@@ -19,6 +25,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub use cosmic_pim_caldav::ConflictKind;
 use cosmic_pim_core::merge::{self, Overlap, Side};
 
 /// One unresolved conflict, shaped for the Accounts page.
@@ -30,9 +37,15 @@ pub struct ConflictRow {
     pub book_name: String,
     /// The card's href on the server — the conflict's identity.
     pub href: String,
-    /// Who this device's copy says the card is.
+    /// Which two changes collided: two edits, or an edit and a deletion.
+    pub kind: ConflictKind,
+    /// Who this device's copy says the card is. For
+    /// [`ConflictKind::DeletedHere`] there is no copy here, and this is the
+    /// server's name for them.
     pub yours: String,
-    /// Who the server's copy says the card is.
+    /// Who the server's copy says the card is. For
+    /// [`ConflictKind::DeletedOnServer`] there is no copy there, and this is
+    /// this device's name for them.
     pub theirs: String,
     /// Per-property material, when the base revision was recorded and the
     /// texts are comparable. `None` leaves only the wholesale answers.
@@ -95,22 +108,30 @@ pub fn load(root: &Path) -> Vec<ConflictRow> {
     cosmic_pim_sync::conflicts(root)
         .into_iter()
         .map(|(book, conflict)| {
-            let disputes = conflict.base.as_deref().and_then(|base| {
-                merge::overlaps(base, &conflict.local, &conflict.remote).map(|units| Disputes {
-                    base: base.to_owned(),
-                    local: conflict.local.clone(),
-                    remote: conflict.remote.clone(),
-                    units,
-                    choices: BTreeMap::new(),
-                })
-            });
+            // Per-property choice only makes sense between two edits; with a
+            // deletion on one side there is nothing to merge.
+            let both_edited = conflict.kind == ConflictKind::BothEdited;
+            let disputes = conflict
+                .base
+                .as_deref()
+                .filter(|_| both_edited)
+                .and_then(|base| {
+                    merge::overlaps(base, &conflict.local, &conflict.remote).map(|units| Disputes {
+                        base: base.to_owned(),
+                        local: conflict.local.clone(),
+                        remote: conflict.remote.clone(),
+                        units,
+                        choices: BTreeMap::new(),
+                    })
+                });
             ConflictRow {
                 book_name: books
                     .iter()
                     .find(|b| b.id == book)
                     .map_or_else(|| book.clone(), |b| b.name.clone()),
-                yours: describe(&conflict.local, &conflict.href),
-                theirs: describe(&conflict.remote, &conflict.href),
+                yours: describe(&conflict.local, &conflict.remote, &conflict.href),
+                theirs: describe(&conflict.remote, &conflict.local, &conflict.href),
+                kind: conflict.kind,
                 book,
                 href: conflict.href,
                 disputes,
@@ -157,17 +178,60 @@ pub enum ResolveError {
     Write(String),
 }
 
-/// A card text's name, for "yours" and "theirs". The href's last segment
-/// when the text carries no name at all, so a row is never blank.
-fn describe(text: &str, href: &str) -> String {
-    cosmic_pim_core::vcard::parse_vcards(text, "", "")
-        .first()
-        .map(cosmic_pim_core::model::Contact::label)
-        .filter(|label| !label.is_empty())
-        .unwrap_or_else(|| {
-            href.rsplit('/')
-                .find(|s| !s.is_empty())
-                .unwrap_or(href)
-                .to_owned()
-        })
+/// A card text's name, for "yours" and "theirs". When that side is a
+/// deletion its text is empty, and the other side names the card; the href's
+/// last segment is the last resort, so a row is never blank.
+fn describe(text: &str, other: &str, href: &str) -> String {
+    let name = |text: &str| {
+        cosmic_pim_core::vcard::parse_vcards(text, "", "")
+            .first()
+            .map(cosmic_pim_core::model::Contact::label)
+            .filter(|label| !label.is_empty())
+    };
+    name(text).or_else(|| name(other)).unwrap_or_else(|| {
+        href.rsplit('/')
+            .find(|s| !s.is_empty())
+            .unwrap_or(href)
+            .to_owned()
+    })
+}
+
+/// What a conflict row says, and what its two buttons say, by kind.
+///
+/// "Keep mine" and "Take the server's" are exact for two edits and
+/// misleading for a deletion: keeping this device's side of a
+/// [`ConflictKind::DeletedHere`] conflict *deletes* the card on the server.
+#[must_use]
+pub fn wording(row: &ConflictRow) -> Wording {
+    match row.kind {
+        ConflictKind::BothEdited => Wording {
+            summary: crate::fl!(
+                "conflict-versions",
+                yours = row.yours.clone(),
+                theirs = row.theirs.clone()
+            ),
+            keep_mine: crate::fl!("conflict-keep-mine"),
+            take_theirs: crate::fl!("conflict-take-theirs"),
+        },
+        ConflictKind::DeletedOnServer => Wording {
+            summary: crate::fl!("conflict-deleted-on-server", name = row.yours.clone()),
+            keep_mine: crate::fl!("conflict-keep-and-restore-on-server"),
+            take_theirs: crate::fl!("conflict-delete-here-too"),
+        },
+        ConflictKind::DeletedHere => Wording {
+            summary: crate::fl!("conflict-deleted-here", name = row.theirs.clone()),
+            keep_mine: crate::fl!("conflict-delete-on-server-too"),
+            take_theirs: crate::fl!("conflict-restore-servers"),
+        },
+    }
+}
+
+/// The text of one conflict row: see [`wording`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wording {
+    pub summary: String,
+    /// The label for [`Resolution::KeepMine`].
+    pub keep_mine: String,
+    /// The label for [`Resolution::TakeTheirs`].
+    pub take_theirs: String,
 }
