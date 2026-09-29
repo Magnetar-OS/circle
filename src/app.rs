@@ -10,6 +10,7 @@ use cosmic::prelude::*;
 use cosmic::widget::menu::action::MenuAction as _;
 use cosmic::widget::{self, about::About, menu, nav_bar};
 use cosmic_pim_core::model::{CalendarMeta, Contact};
+use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -2516,9 +2517,7 @@ impl AppModel {
                     joined += 1;
                 }
                 Err(why) => {
-                    first_error.get_or_insert_with(|| {
-                        fl!("error-save", name = contact.label(), why = why.to_string())
-                    });
+                    first_error.get_or_insert_with(|| save_error(&contact.label(), &why));
                 }
             }
         }
@@ -2715,12 +2714,15 @@ impl AppModel {
         // converts.
         if let Err(why) = store.save_as(&contact, version) {
             // Deliberately keeps the editor open: the save failed, so the
-            // user's text is the only copy that exists.
-            return self.toast(fl!(
-                "error-save",
-                name = contact.label(),
-                why = why.to_string()
-            ));
+            // user's text is the only copy that exists. When the card changed
+            // on disk underneath the editor, the list is re-read so it shows
+            // the other version, and the message says where this one went.
+            if matches!(why, StoreError::Conflict { .. }) {
+                store.refresh();
+                self.photos.remove(&ContactKey::of(&contact));
+                self.reload();
+            }
+            return self.toast(save_error(&contact.label(), &why));
         }
 
         // The save landed — queue it for upload before anything later in this
@@ -2968,11 +2970,7 @@ impl AppModel {
             if let Err(why) = store.save_as(&contact, version) {
                 self.csv = None;
                 self.reload();
-                return self.toast(fl!(
-                    "error-save",
-                    name = contact.label(),
-                    why = why.to_string()
-                ));
+                return self.toast(save_error(&contact.label(), &why));
             }
             if let Some(saved) = store.contact(&book_id, &contact.uid) {
                 // An updated row adopted the existing card's bytes above;
@@ -3291,6 +3289,26 @@ fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'stat
             tracing::warn!(%why, "could not re-encode the photo; storing it unchanged");
             (data, fallback_mime)
         }
+    }
+}
+
+/// Why a card could not be saved, as a sentence for a toast.
+///
+/// A lost race gets its own words: the file changed on disk between the read
+/// and the write (a sync pass, another app), nothing was overwritten, and
+/// this version was kept beside it — which the generic message would bury in
+/// the substrate's English.
+fn save_error(name: &str, why: &StoreError) -> String {
+    match why {
+        StoreError::Conflict { conflict, .. } => fl!(
+            "error-save-conflict",
+            name = name,
+            file = conflict.file_name().map_or_else(
+                || conflict.display().to_string(),
+                |f| f.to_string_lossy().into_owned()
+            )
+        ),
+        other => fl!("error-save", name = name, why = other.to_string()),
     }
 }
 
@@ -3917,6 +3935,31 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         let err = queue_push(&store, &book.id, "ada.vcf").unwrap_err();
         assert!(!err.is_empty());
         assert!(queue_removal(&store, &book.id, "ada.vcf").is_err());
+    }
+
+    /// A save that lost a race with another writer says so, and names the
+    /// file this version was kept in, rather than the substrate's English.
+    #[test]
+    fn a_save_that_lost_a_race_says_where_the_edit_went() {
+        let why = StoreError::Conflict {
+            target: "/c/personal/ada.vcf".into(),
+            conflict: "/c/personal/ada.vcf.1790000000.conflict".into(),
+        };
+        let message = save_error("Ada", &why);
+        assert_eq!(
+            message,
+            fl!(
+                "error-save-conflict",
+                name = "Ada",
+                file = "ada.vcf.1790000000.conflict"
+            )
+        );
+
+        let read_only = StoreError::ReadOnly("Work".to_owned());
+        assert_eq!(
+            save_error("Ada", &read_only),
+            fl!("error-save", name = "Ada", why = read_only.to_string())
+        );
     }
 
     /// A PNG of the given size, for the photo-processing tests.

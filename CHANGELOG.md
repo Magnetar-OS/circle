@@ -80,6 +80,10 @@ All notable changes to this project are documented here. The format follows
   deleted can still be undone; the Undo used to be dropped along with the
   error. Notes that could not be removed with a deleted contact, or put back
   by Undo, and a link that could not be opened, now say so.
+- A contact changed on disk by a sync or another app at the moment you
+  save it is no longer overwritten. The save stops, the list shows the other
+  version, the editor stays open, and the message names the file your
+  version was kept in.
 - Exporting with every address book hidden says so, instead of claiming
   there is no address book that can be written to.
 - An attachment whose stored copy was cut short by a crash is repaired the

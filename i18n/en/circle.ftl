@@ -178,6 +178,7 @@ show-book = Show this address book
 
 error-load-contacts = Could not load contacts.
 error-save = Could not save { $name }: { $why }
+error-save-conflict = { $name } was changed by something else while you were editing, so nothing was overwritten. Your version was kept beside it as { $file }. Save again to replace the other version, or cancel to keep it.
 error-delete = Could not delete { $name }: { $why }
 error-no-writable-book =
     There is no address book that can be written to. Add a CardDAV account, or
