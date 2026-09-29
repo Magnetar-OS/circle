@@ -87,6 +87,8 @@ All notable changes to this project are documented here. The format follows
   save it is no longer overwritten. The save stops, the list shows the other
   version, the editor stays open, and the message names the file your
   version was kept in.
+- The Accounts page shows accounts added or removed in Slate or Envelope
+  while Circle is open; it used to show the list from when Circle started.
 - Exporting with every address book hidden says so, instead of claiming
   there is no address book that can be written to.
 - An attachment whose stored copy was cut short by a crash is repaired the

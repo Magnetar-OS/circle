@@ -1017,6 +1017,9 @@ impl AppModel {
                     self.context_page = page;
                     self.core.window.show_context = true;
                 }
+                if page == ContextPage::Accounts && self.core.window.show_context {
+                    return self.reload_accounts();
+                }
             }
             Message::UpdateConfig(config) => {
                 self.config = config;
@@ -1198,7 +1201,10 @@ impl AppModel {
                 self.sync_status = Some(summary.lines.join("\n"));
                 // A pass can record new conflicts without changing a card.
                 self.reload_conflicts();
-                let alert = self.sync_alert(summary.attention);
+                // The pass re-read accounts.toml on its own handle and may have
+                // bound new collections; this one was opened at start-up.
+                let reloaded = self.reload_accounts();
+                let alert = Task::batch([self.sync_alert(summary.attention), reloaded]);
                 if summary.changed {
                     // Sync wrote `.vcf` files directly; everything read from
                     // them — the list, the nav, the photo cache — is stale.
@@ -1214,6 +1220,7 @@ impl AppModel {
             Message::ShowAccounts => {
                 self.context_page = ContextPage::Accounts;
                 self.core.window.show_context = true;
+                return self.reload_accounts();
             }
 
             Message::NewContact => {
@@ -2851,6 +2858,18 @@ impl AppModel {
             .map(Into::into)
     }
 
+    /// Re-reads the shared account store before the Accounts page shows it.
+    ///
+    /// The handle lives as long as the window, and Slate, Envelope and every
+    /// sync pass write the same `accounts.toml`; a list from start-up would
+    /// show accounts removed elsewhere and miss ones added there.
+    fn reload_accounts(&mut self) -> Task<Message> {
+        match self.accounts.as_mut().map(reload_account_store) {
+            Some(Err(why)) => self.toast(why),
+            _ => Task::none(),
+        }
+    }
+
     /// Re-reads the unresolved conflicts from the sync sidecars.
     fn reload_conflicts(&mut self) {
         self.conflicts = crate::conflicts::load(&self.contacts_root);
@@ -3290,6 +3309,14 @@ fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'stat
             (data, fallback_mime)
         }
     }
+}
+
+/// [`cosmic_pim_accounts::AccountStore::reload`], with the failure as a
+/// sentence for a toast.
+fn reload_account_store(accounts: &mut cosmic_pim_accounts::AccountStore) -> Result<(), String> {
+    accounts
+        .reload()
+        .map_err(|why| format!("{}: {why}", fl!("accounts")))
 }
 
 /// Why a card could not be saved, as a sentence for a toast.
@@ -3960,6 +3987,39 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             save_error("Ada", &read_only),
             fl!("error-save", name = "Ada", why = read_only.to_string())
         );
+    }
+
+    /// An account added by Slate while Circle is open shows up on Circle's
+    /// Accounts page, and one removed there disappears: the page re-reads
+    /// the shared store instead of trusting the start-up snapshot.
+    #[test]
+    fn the_account_list_follows_changes_made_by_another_app() {
+        use cosmic_pim_accounts::{Account, AccountStore, SecretStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let open = || {
+            AccountStore::open(
+                &dir.path().join("accounts.toml"),
+                SecretStore::open_envelope_only("circle-test", dir.path()),
+            )
+            .unwrap()
+        };
+        let mut circle = open();
+        let mut slate = open();
+
+        let account = Account::new("Fastmail", "https://dav.example.com", "ada");
+        let id = account.id.clone();
+        slate.add(account, "secret").unwrap();
+        assert!(
+            circle.accounts().is_empty(),
+            "a stale handle saw the change"
+        );
+        reload_account_store(&mut circle).unwrap();
+        assert_eq!(circle.accounts().len(), 1);
+
+        slate.remove(&id).unwrap();
+        reload_account_store(&mut circle).unwrap();
+        assert!(circle.accounts().is_empty());
     }
 
     /// A PNG of the given size, for the photo-processing tests.
