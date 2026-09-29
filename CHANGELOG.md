@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-29
+
 ### Added
 
 - **Sync conflicts can be resolved.** A contact changed both here and on the
@@ -325,6 +327,7 @@ All notable changes to this project are documented here. The format follows
   buttons in the editor, and the back button in the narrow layout — now has a
   tooltip. An icon alone is not a name.
 
-[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Magnetar-OS/circle/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Magnetar-OS/circle/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/Magnetar-OS/circle/releases/tag/v1.0.1
