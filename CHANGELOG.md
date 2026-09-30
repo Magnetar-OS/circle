@@ -28,6 +28,12 @@ All notable changes to this project are documented here. The format follows
   at all. All four can now be removed, and the label goes with them instead
   of being left on the card labelling nothing. Emptying such an entry removes
   it too.
+- A card holding two emails, phones, websites or addresses under one custom
+  label (`item1.EMAIL:a` and `item1.EMAIL:b`) keeps both on a save. Any save
+  used to rewrite both lines to the last value, and that loss was uploaded.
+- Deleting or importing one contact in a `.vcf` holding several cards written
+  in lowercase (`begin:vcard`) no longer removes or replaces everyone else in
+  the file.
 
 ## [1.2.0] - 2026-09-29
 
