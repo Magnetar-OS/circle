@@ -353,3 +353,10 @@ attachments-are-local =
     written to the contact's card and never reach a server.
 attachment-added = Attached { $name }.
 attachment-missing = { $name } is no longer on disk.
+
+## Favorites — starred people, kept on this computer only
+
+favorites = Favorites
+other-contacts = Other contacts
+favorite-add = Add to favorites
+favorite-remove = Remove from favorites

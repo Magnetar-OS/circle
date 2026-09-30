@@ -43,6 +43,11 @@ Reading, searching, creating, editing, and deleting contacts all work.
   birthday, nicknames, websites, categories, and notes, with `TYPE` labels and
   one preferred (`PREF`) entry per list. Edits patch the stored card rather than
   rebuilding it; see [Editing](#editing).
+- **Favorites.** Star somebody from the star beside their name, a
+  right-click on their row, Edit → Add to favorites, or Ctrl+D, and they
+  lead the list under a *Favorites* heading, as in GNOME Contacts — and the
+  launcher's results. A star is kept on this computer only, never written
+  into the card; see [Notes and keeping in touch](#notes-and-keeping-in-touch).
 - **Creating and deleting.** A single delete happens immediately with an Undo
   toast — the card comes back byte for byte; deleting several at once asks
   first.
@@ -287,6 +292,13 @@ union of their cards' notes — the same rule the detail view uses for their
 addresses — so linking and unlinking are lossless in both directions and
 neither needs a migration. Deleting a contact takes their notes with them, and
 undoing that delete brings both back.
+
+Favorites live here too, for the same reason: whom you starred is yours, and
+a card that syncs would tell every device and everyone sharing the book. The
+cost is that a star stays on the computer it was set on. Starring a person
+stars each of their cards, and a person is starred while any card is — so the
+star survives linking, unlinking, and deleting one card of several, and an
+undone delete brings it back with the card.
 
 Attachments follow the same rule and one more: their bytes live in
 `.crm/blobs/`, named by the SHA-256 of their contents. Attaching one file to

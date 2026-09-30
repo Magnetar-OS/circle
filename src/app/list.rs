@@ -213,6 +213,10 @@ impl AppModel {
             });
         }
 
+        // Starred people lead the list, each half in the order it was just
+        // given. Last, so nothing after it can reorder the rows it counted.
+        self.favorites = crate::crm::favorites_first(&mut self.contacts, &self.crm, &self.links);
+
         // Drop a selection the query has filtered away, or the detail pane
         // keeps showing someone who is no longer in the list.
         if self
@@ -259,6 +263,35 @@ impl AppModel {
                 // contact photo is off by design (03: opt-in "if ever").
                 Some(cosmic_pim_core::vcard::Photo::Uri(_)) | None => {}
             }
+        }
+    }
+
+    /// Whether the row at `key` is in the list's starred section.
+    pub(super) fn is_favorite(&self, key: &ContactKey) -> bool {
+        self.contacts
+            .iter()
+            .take(self.favorites)
+            .any(|contact| key.matches(contact))
+    }
+
+    /// Stars or unstars the person on the row at `key` — all of their cards,
+    /// so the star does not depend on which of them the row stands on.
+    pub(super) fn set_favorite(&mut self, key: &ContactKey, favorite: bool) -> Task<Message> {
+        let mut cards = self.links.cards_of_person(&key.book, &key.uid);
+        // A link record goes on naming a card after it is deleted. Starring
+        // that one would write a record about nobody.
+        if favorite
+            && cards.len() > 1
+            && let Some(store) = self.store.as_ref()
+        {
+            cards.retain(|card| store.contact(&card.book, &card.uid).is_some());
+        }
+        let result = self.crm.set_favorite(&cards, favorite);
+        // Even when it failed: part of it may have been written.
+        self.reload();
+        match result {
+            Ok(()) => Task::none(),
+            Err(why) => self.toast(why),
         }
     }
 

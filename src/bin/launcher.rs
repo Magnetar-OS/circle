@@ -159,9 +159,11 @@ impl Plugin {
         // Pick up anything synced since the last query.
         store.refresh();
 
-        // Re-read too: linking happens in the app while this plugin runs.
+        // Re-read too: linking and starring happen in the app while this
+        // plugin runs.
         let links = circle::links::LinkStore::open(store.root());
-        let matches = matching(store, &self.config, &links, &needle);
+        let crm = circle::crm::CrmStore::open(store.root());
+        let matches = matching(store, &self.config, &links, &crm, &needle);
 
         for (id, contact) in matches.iter().enumerate() {
             send(&append_message(id, contact));
@@ -285,12 +287,15 @@ fn copy_to_clipboard(value: &str) {
 }
 
 /// The results for one query: visible books only, one row per linked
-/// person — the app's list shows Ada once, and so does the launcher — capped
-/// at [`MAX_RESULTS`] after folding so a person does not use up two slots.
+/// person — the app's list shows Ada once, and so does the launcher — with
+/// the starred people first, as in the app's list. Capped at [`MAX_RESULTS`]
+/// after folding and ranking, so a person does not use up two slots and a
+/// favorite is not the one the cap cuts.
 fn matching(
     store: &ContactStore,
     config: &Config,
     links: &circle::links::LinkStore,
+    crm: &circle::crm::CrmStore,
     needle: &str,
 ) -> Vec<Contact> {
     let found: Vec<Contact> = store
@@ -299,6 +304,7 @@ fn matching(
         .filter(|c| !config.is_hidden(&c.addressbook_id))
         .collect();
     let mut rows = links.fold(found).rows;
+    circle::crm::favorites_first(&mut rows, crm, links);
     rows.truncate(MAX_RESULTS);
     rows
 }
@@ -432,8 +438,74 @@ mod tests {
             ])
             .unwrap();
 
-        let found = matching(&store, &Config::default(), &links, "ada");
+        let crm = circle::crm::CrmStore::open(dir.path());
+        let found = matching(&store, &Config::default(), &links, &crm, "ada");
         assert_eq!(found.len(), 1, "one person listed twice");
+    }
+
+    /// A starred contact is the first result, and is never the one the
+    /// result cap leaves out — however many other people match.
+    #[test]
+    fn a_favorite_is_ranked_first_and_survives_the_cap() {
+        use circle::crm::CrmStore;
+        use circle::links::{CardRef, LinkStore};
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Home", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        // More matches than the cap, and the favorite sorts last by name.
+        for n in 0..=MAX_RESULTS {
+            write_contact_raw(
+                &book,
+                &format!("{n}.vcf"),
+                &format!(
+                    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:m{n}\r\nFN:Maria {n:02}\r\nEND:VCARD\r\n"
+                ),
+            )
+            .unwrap();
+        }
+        write_contact_raw(
+            &book,
+            "z.vcf",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:star\r\nFN:Maria Zeta\r\nEND:VCARD\r\n",
+        )
+        .unwrap();
+        store.refresh();
+        let links = LinkStore::open(dir.path());
+        let mut crm = CrmStore::open(dir.path());
+
+        let plain = matching(&store, &Config::default(), &links, &crm, "maria");
+        assert_eq!(plain.len(), MAX_RESULTS);
+        assert!(
+            plain.iter().all(|c| c.uid != "star"),
+            "the fixture no longer puts the favorite past the cap"
+        );
+
+        crm.set_favorite(
+            &[CardRef {
+                book: book.id.clone(),
+                uid: "star".to_owned(),
+            }],
+            true,
+        )
+        .unwrap();
+        let ranked = matching(&store, &Config::default(), &links, &crm, "maria");
+        assert_eq!(ranked.len(), MAX_RESULTS);
+        assert_eq!(
+            ranked[0].uid, "star",
+            "the favorite is not the first result"
+        );
+        assert_eq!(
+            ranked[1..].iter().map(|c| &c.uid).collect::<Vec<_>>(),
+            plain[..MAX_RESULTS - 1]
+                .iter()
+                .map(|c| &c.uid)
+                .collect::<Vec<_>>(),
+            "the others changed order"
+        );
     }
 
     /// Every message this plugin sends, read back by the types pop-launcher

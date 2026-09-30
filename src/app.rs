@@ -236,8 +236,12 @@ pub struct AppModel {
     writable_ids: Vec<String>,
     writable_names: Vec<String>,
 
-    /// Everything matching the current query and book filter, sorted.
+    /// Everything matching the current query and book filter, sorted, the
+    /// starred people first.
     contacts: Vec<Contact>,
+    /// How many rows at the head of `contacts` are starred — where the
+    /// list's "Favorites" section ends. Set by `reload` with the order.
+    favorites: usize,
     selected: Option<ContactKey>,
     /// Selection mode: rows toggle membership in `checked` instead of opening
     /// the detail pane, and the action bar under the list operates on the set.
@@ -400,6 +404,11 @@ pub enum Message {
 
     Unlink(ContactKey),
     ShareRequested,
+    /// Star or unstar the person on this row — the list's context menu and
+    /// the star beside the name.
+    SetFavorite(ContactKey, bool),
+    /// The same for whoever is selected — the Edit menu and its shortcut.
+    ToggleFavorite,
 
     LogInteraction,
     SetCadence(usize),
@@ -449,6 +458,7 @@ pub enum MenuAction {
     SelectAll,
     Duplicates,
     Share,
+    Favorite,
     Search,
     Import,
     ImportCsv,
@@ -472,6 +482,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::SelectAll => Message::SelectAll,
             MenuAction::Duplicates => Message::ReviewDuplicates,
             MenuAction::Share => Message::ShareRequested,
+            MenuAction::Favorite => Message::ToggleFavorite,
             MenuAction::Search => Message::FocusSearch,
             MenuAction::Import => Message::ImportRequested,
             MenuAction::ImportCsv => Message::ImportCsvRequested,
@@ -577,6 +588,7 @@ impl cosmic::Application for AppModel {
             writable_ids: Vec::new(),
             writable_names: Vec::new(),
             contacts: Vec::new(),
+            favorites: 0,
             selected: None,
             selecting: false,
             checked: std::collections::HashSet::new(),
@@ -703,6 +715,9 @@ impl cosmic::Application for AppModel {
         crate::ui::menus::bar(
             &self.key_binds,
             self.selected.is_some() && self.editor.is_none(),
+            self.selected
+                .as_ref()
+                .is_some_and(|key| self.is_favorite(key)),
         )
     }
 
@@ -1323,6 +1338,17 @@ impl AppModel {
                     self.dialog = Some(Dialog::Share {
                         key: ContactKey::of(contact),
                     });
+                }
+            }
+            Message::SetFavorite(key, favorite) => return self.set_favorite(&key, favorite),
+            Message::ToggleFavorite => {
+                // Disabled in the menu while the editor is open; the key
+                // binding is not routed through the menu, so it asks too.
+                if self.editor.is_none()
+                    && let Some(key) = self.selected.clone()
+                {
+                    let favorite = !self.is_favorite(&key);
+                    return self.set_favorite(&key, favorite);
                 }
             }
             Message::PhonesFound(phones) => {

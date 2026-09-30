@@ -34,7 +34,7 @@ accessibility.
 | Sort by first or last name | have | Settings, via cosmic-config. |
 | Adaptive layout (desktop → narrow) | have | Three panes wide; list/detail take turns below 640 px, down to 360 px. |
 | Selection mode (multi-select operations) | have | Select button, Ctrl+click, Shift+range, Ctrl+A; delete, export, add-to-group. |
-| Favorites pinned to top of list | gap | GNOME Contacts marks favorites; Circle has no equivalent (the star in the editor is the PREF toggle, a different thing). |
+| Favorites pinned to top of list | have | As GNOME Contacts 51 does it (checked in its source): starred people first under a "Favorites" heading, then the rest. Star from the detail pane, a row's right-click menu, Edit menu or Ctrl+D (GNOME: the contact menu only, no key). Kept in `.crm/` on this device, never in the card; the launcher ranks favorites first. |
 | mailto:/tel: actions from the detail pane | have | Through the desktop handler; KDE Connect picks up `tel:` when installed. Direct D-Bus handoff open (03 §3). |
 | Address opens in a maps app | verify | GNOME's behaviour and Circle's both unchecked; Circle shows the address as text. |
 | Share contact as QR code | have | `ui/share.rs`: a trimmed card (no photo) fitted to one code, SVG rendered in the app. |
@@ -114,7 +114,7 @@ counts against the ceiling.
 
 | Feature | Status | Notes |
 |---|---|---|
-| Keyboard shortcuts via KeyBind table | have | Ctrl+N/E/A/F/I/R, Ctrl+Shift+E, Ctrl+Shift+R (sync), Ctrl+, and Delete (src/key_bind.rs); arrows walk the list. |
+| Keyboard shortcuts via KeyBind table | have | Ctrl+N/E/A/D/F/I/R, Ctrl+Shift+E, Ctrl+Shift+R (sync), Ctrl+, and Delete (src/key_bind.rs); arrows walk the list. |
 | Every action keyboard-reachable | partial | Milestone-5 exit criterion; not audited yet. |
 | Shortcut cheat-sheet / palette | gap | The Envelope registry pattern is slated to extend here (roadmap M5). |
 | Screen reader, contrast, 125/150% text scaling, reduced motion | verify | Milestone-5 items; current state unmeasured. GNOME 51.0 announces import errors to screen readers; Circle reports them in a toast, whose announcement has not been checked. |
@@ -173,15 +173,15 @@ synced book queued a DELETE of the whole file on the server (audit F-15).
 
 ## Ceiling gaps, ranked
 
-1. **Favorites** — the last list-level baseline gap. Needs a storage
-   decision first: local (`.crm/`) or synced with the card.
-2. **Adding OAuth accounts from Circle** — sync already works; only the form
+1. **Adding OAuth accounts from Circle** — sync already works; only the form
    is missing.
-3. **Exchange / EWS** — not in the substrate.
-4. **Editable relationships** — needs a byte-preserving patcher for
+2. **Exchange / EWS** — not in the substrate.
+3. **Editable relationships** — needs a byte-preserving patcher for
    `RELATED` / `X-ABRELATEDNAMES` in the substrate.
-5. **Automatic last-contacted from mail** — waits on Envelope's hook.
-6. **Tasks per contact** — decide first.
-7. **Custom fields UI, drag-to-assign, group as compose list, OCR.**
-8. **LDAP read-only** — last, org-user audience, behind the substrate's
+4. **Automatic last-contacted from mail** — waits on Envelope's hook.
+5. **Custom fields UI, drag-to-assign, group as compose list, OCR.**
+6. **LDAP read-only** — last, org-user audience, behind the substrate's
    collection abstraction.
+
+Favorites, the last list-level baseline gap, were built on 2026-09-30 with
+local storage (`.crm/`), the option the user chose over a synced property.

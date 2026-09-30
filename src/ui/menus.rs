@@ -25,6 +25,9 @@ pub fn bar(
     // Whether anything is selected and editable — what the contact-specific
     // entries need to be more than decoration.
     can_edit: bool,
+    // Whether the selected contact is starred, which decides what the
+    // favorites entry offers to do.
+    favorite: bool,
 ) -> Vec<Element<'_, Message>> {
     // Enabled or disabled, same label and same action: the accelerator still
     // prints, and the item stays where the user remembers it.
@@ -62,6 +65,14 @@ pub fn bar(
                 contact_item(fl!("edit-contact"), MenuAction::EditContact),
                 contact_item(fl!("delete-contact"), MenuAction::Delete),
                 contact_item(fl!("share-contact"), MenuAction::Share),
+                contact_item(
+                    if favorite {
+                        fl!("favorite-remove")
+                    } else {
+                        fl!("favorite-add")
+                    },
+                    MenuAction::Favorite,
+                ),
                 menu::Item::Divider,
                 menu::Item::Button(fl!("select-all"), None, MenuAction::SelectAll),
                 menu::Item::Button(fl!("find-duplicates"), None, MenuAction::Duplicates),

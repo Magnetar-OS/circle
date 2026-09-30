@@ -22,6 +22,9 @@
 //! for byte from its toast while several ticked rows still ask first — so the
 //! key is no easier a way to lose somebody than the menu item.
 //!
+//! Ctrl+D stars and unstars the selected contact — the chord browsers and
+//! file managers use for "bookmark this". GNOME Contacts has no key for it.
+//!
 //! Sync now is Ctrl+Shift+R. Slate uses Ctrl+R for its sync, but here Ctrl+R
 //! has always been Refresh (re-read the files on disk), and moving it would
 //! break a habit for a chord the other half of the pair can live beside.
@@ -53,6 +56,7 @@ pub fn key_binds() -> HashMap<KeyBind, MenuAction> {
     bind!([Ctrl], Key::Character("n".into()), NewContact);
     bind!([Ctrl], Key::Character("e".into()), EditContact);
     bind!([Ctrl], Key::Character("a".into()), SelectAll);
+    bind!([Ctrl], Key::Character("d".into()), Favorite);
     bind!([Ctrl], Key::Character("f".into()), Search);
     bind!([Ctrl], Key::Character("i".into()), Import);
     bind!([Ctrl, Shift], Key::Character("e".into()), Export);
@@ -96,11 +100,13 @@ mod tests {
         }
     }
 
-    /// Delete and Sync now have keys (audit O-03, O-04).
+    /// Delete, Sync now and the favorites toggle have keys (audit O-03,
+    /// O-04, O-05).
     #[test]
-    fn delete_and_sync_now_have_keys() {
+    fn delete_sync_now_and_favorite_have_keys() {
         let actions: Vec<MenuAction> = key_binds().into_values().collect();
         assert!(actions.contains(&MenuAction::Delete));
         assert!(actions.contains(&MenuAction::SyncNow));
+        assert!(actions.contains(&MenuAction::Favorite));
     }
 }

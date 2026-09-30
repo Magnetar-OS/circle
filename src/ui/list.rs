@@ -5,7 +5,7 @@
 use cosmic::iced::core::text::{Ellipsize, EllipsizeHeightLimit};
 use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
-use cosmic::widget;
+use cosmic::widget::{self, menu};
 use cosmic_pim_core::model::Contact;
 
 use crate::app::{ContactKey, Message};
@@ -19,6 +19,8 @@ pub fn list<'a>(
     photos: &'a std::collections::HashMap<ContactKey, widget::image::Handle>,
     selecting: bool,
     checked: &std::collections::HashSet<ContactKey>,
+    // How many rows at the head of `contacts` are starred.
+    favorites: usize,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -35,13 +37,34 @@ pub fn list<'a>(
         .into();
     }
 
-    let mut column = widget::column::with_capacity(contacts.len()).spacing(spacing.space_xxxs);
-    for contact in contacts {
+    // The starred people are a section of their own at the top, headed the
+    // way GNOME Contacts heads it. With nobody starred there is one list and
+    // nothing to set apart, so no headings either.
+    let heading = |label: String| {
+        widget::text::heading(label)
+            .class(cosmic::theme::Text::Custom(crate::ui::dim_text))
+            .apply(widget::container)
+            .padding([spacing.space_xxs, spacing.space_xs])
+    };
+
+    // What a right-click on a row offers, worded once rather than per row.
+    let (star, unstar) = (fl!("favorite-add"), fl!("favorite-remove"));
+
+    let mut column = widget::column::with_capacity(contacts.len() + 2).spacing(spacing.space_xxxs);
+    for (index, contact) in contacts.iter().enumerate() {
+        if favorites > 0 && index == 0 {
+            column = column.push(heading(fl!("favorites")));
+        }
+        if favorites > 0 && index == favorites {
+            column = column.push(heading(fl!("other-contacts")));
+        }
         let key = ContactKey::of(contact);
         let is_selected = selected.is_some_and(|key| key.matches(contact));
         let photo = photos.get(&key);
         let check = selecting.then_some(checked.contains(&key));
-        column = column.push(row(contact, is_selected, photo, check));
+        let favorite = index < favorites;
+        let toggle = if favorite { &unstar } else { &star };
+        column = column.push(row(contact, is_selected, photo, check, favorite, toggle));
     }
 
     widget::scrollable(column.padding(spacing.space_xxs))
@@ -55,6 +78,9 @@ fn row<'a>(
     photo: Option<&widget::image::Handle>,
     // `None` outside selection mode; `Some(ticked)` inside it.
     check: Option<bool>,
+    favorite: bool,
+    // The context menu's one entry: what pressing it would do to `favorite`.
+    toggle: &str,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
 
@@ -93,7 +119,7 @@ fn row<'a>(
     }
     let ticked = check == Some(true);
 
-    widget::button::custom(
+    let button = widget::button::custom(
         content
             .push(crate::ui::avatar::avatar(
                 photo,
@@ -110,8 +136,21 @@ fn row<'a>(
     })
     .padding([spacing.space_xxs, spacing.space_xs])
     .width(Length::Fill)
-    .on_press(Message::Select(ContactKey::of(contact)))
-    .into()
+    .on_press(Message::Select(ContactKey::of(contact)));
+
+    // Selection mode acts on the ticked set, from the bar under the list; a
+    // menu for the one row under the pointer would be a second answer to
+    // "what does this act on".
+    if check.is_some() {
+        return button.into();
+    }
+
+    // A right-click stars or unstars the row without selecting it first.
+    let toggle: Element<'static, Message> =
+        menu::menu_button(vec![widget::text::body(toggle.to_owned()).into()])
+            .on_press(Message::SetFavorite(ContactKey::of(contact), !favorite))
+            .into();
+    widget::context_menu(button, Some(vec![menu::Tree::new(toggle)])).into()
 }
 
 /// The detail pane for one person — one card, or several linked into one.
@@ -131,6 +170,7 @@ pub fn detail<'a>(
     // Whether a paired phone is in reach, which is what makes texting a
     // number possible at all.
     can_text: bool,
+    favorite: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let mut column = widget::column::with_capacity(8).spacing(spacing.space_s);
@@ -138,7 +178,7 @@ pub fn detail<'a>(
     // The avatar and the name share the header row. Sized in spacing tokens
     // rather than pixels, per the conventions doc: no raw pixel values.
     column = column.push(
-        widget::row::with_capacity(2)
+        widget::row::with_capacity(3)
             .align_y(Alignment::Center)
             .spacing(spacing.space_s)
             .push(crate::ui::avatar::avatar(
@@ -146,7 +186,8 @@ pub fn detail<'a>(
                 &person.label,
                 f32::from(spacing.space_xxl),
             ))
-            .push(widget::text::title3(person.label.clone())),
+            .push(widget::text::title3(person.label.clone()))
+            .push(favorite_button(ContactKey::of(person.head), favorite)),
     );
 
     if let Some(heading) = person.heading().as_ref() {
@@ -230,6 +271,22 @@ pub fn detail<'a>(
     // this and scrolls the three together — a scrollable inside a scrollable
     // gives two scrollbars and a pane that will not reach its own bottom.
     column.into()
+}
+
+/// The star beside a person's name: filled when they are a favorite, and
+/// pressing it changes that.
+fn favorite_button<'a>(key: ContactKey, favorite: bool) -> Element<'a, Message> {
+    let (icon, action) = if favorite {
+        ("starred-symbolic", fl!("favorite-remove"))
+    } else {
+        ("non-starred-symbolic", fl!("favorite-add"))
+    };
+    widget::tooltip(
+        widget::button::icon(crate::ui::icon(icon)).on_press(Message::SetFavorite(key, !favorite)),
+        widget::text::body(action),
+        widget::tooltip::Position::Bottom,
+    )
+    .into()
 }
 
 /// One labelled, selectable, copyable value, optionally with an action button

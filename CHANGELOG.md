@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Favorites.** Star a contact with the star beside their name, from a
+  right-click on their row, from Edit → Add to favorites, or with Ctrl+D.
+  Starred people lead the list under a *Favorites* heading, as in GNOME
+  Contacts, and come first in the launcher's results. A star stays on this
+  computer: it is kept with Circle's notes, not written into the card, so it
+  does not sync. It survives linking and unlinking, and an undone delete
+  brings it back.
+
 ### Fixed
 
 - An address with a custom label (the kind iCloud and Apple Contacts write)

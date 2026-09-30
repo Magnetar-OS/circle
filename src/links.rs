@@ -121,6 +121,21 @@ impl LinkStore {
             .find(|p| p.cards.iter().any(|c| c.book == book && c.uid == uid))
     }
 
+    /// Every card of the person this card belongs to, in precedence order —
+    /// or the card alone, when it is nobody's but its own.
+    #[must_use]
+    pub fn cards_of_person(&self, book: &str, uid: &str) -> Vec<CardRef> {
+        self.person_of(book, uid).map_or_else(
+            || {
+                vec![CardRef {
+                    book: book.to_owned(),
+                    uid: uid.to_owned(),
+                }]
+            },
+            |person| person.cards.clone(),
+        )
+    }
+
     /// One row per person: every linked card present in `contacts` folds
     /// under its person's head, which is the first card in the person's
     /// record order that is present. Unlinked cards pass through. Rows keep

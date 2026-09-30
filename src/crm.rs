@@ -19,6 +19,17 @@
 //! taking a card back out takes its own notes with it. Keying by person would
 //! need a migration every time two people became one.
 //!
+//! # Favorites
+//!
+//! A star is the same kind of fact as a note: yours, about somebody, and
+//! nobody else's business. It is kept here and never written into the card,
+//! so it stays on this computer — it does not sync, and a shared address
+//! book does not tell its other readers whom you starred.
+//!
+//! Starring a person stars every one of their cards, and a person is starred
+//! while any of their cards is. That is what keeps the star where it was put
+//! through linking, unlinking, and deleting one card of several.
+//!
 //! # What is deliberately not here
 //!
 //! No scheduler and no notifications. "Overdue" is a question asked of the
@@ -31,7 +42,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
-use crate::links::CardRef;
+use cosmic_pim_core::model::Contact;
+
+use crate::links::{CardRef, LinkStore};
 
 /// One timestamped note.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -68,6 +81,9 @@ pub struct Record {
     /// in the shared blob directory; these are references to them.
     #[serde(default)]
     pub attachments: Vec<crate::attachments::Attachment>,
+    /// Starred — see the module docs.
+    #[serde(default)]
+    pub favorite: bool,
 }
 
 impl Record {
@@ -77,6 +93,7 @@ impl Record {
             && self.interactions.is_empty()
             && self.cadence_days.is_none()
             && self.attachments.is_empty()
+            && !self.favorite
     }
 
     #[must_use]
@@ -275,6 +292,28 @@ impl CrmStore {
         self.records
             .values()
             .any(|record| record.attachments.iter().any(|a| a.blob == blob))
+    }
+
+    /// Whether a person is starred, given their cards: any one of them is.
+    #[must_use]
+    pub fn is_favorite(&self, cards: &[CardRef]) -> bool {
+        cards
+            .iter()
+            .any(|card| self.records.get(card).is_some_and(|r| r.favorite))
+    }
+
+    /// Stars or unstars a person: every one of the given cards.
+    ///
+    /// Every card, so the star outlives unlinking and the deletion of any one
+    /// of them. A card already in the wanted state is not rewritten, which
+    /// also keeps unstarring from creating records for cards that had none.
+    pub fn set_favorite(&mut self, cards: &[CardRef], favorite: bool) -> Result<(), String> {
+        for card in cards {
+            if self.records.get(card).is_some_and(|r| r.favorite) != favorite {
+                self.change(card, |record| record.favorite = favorite)?;
+            }
+        }
+        Ok(())
     }
 
     /// Puts a whole record back — the undo side of [`Self::forget`].
@@ -486,6 +525,28 @@ pub fn summarise(store: &CrmStore, cards: &[CardRef]) -> Summary {
         .attachments
         .sort_by_key(|attachment| std::cmp::Reverse(attachment.added));
     summary
+}
+
+/// Moves the starred people to the head of a list of rows and says how many
+/// they are. The order within each half is kept, so the list reads the way it
+/// was sorted, twice over — GNOME Contacts' "Favorites" section.
+///
+/// A row stands for a person, and a person is starred when any card in their
+/// link record is — not only the cards the current filter left visible, or a
+/// star would come and go with the sidebar.
+pub fn favorites_first(rows: &mut [Contact], store: &CrmStore, links: &LinkStore) -> usize {
+    // The ordinary address book has no stars; do not resolve a person per
+    // row to find that out.
+    if !store.records.values().any(|record| record.favorite) {
+        return 0;
+    }
+    let mut favorites = 0;
+    rows.sort_by_cached_key(|row| {
+        let starred = store.is_favorite(&links.cards_of_person(&row.addressbook_id, &row.uid));
+        favorites += usize::from(starred);
+        !starred
+    });
+    favorites
 }
 
 #[cfg(test)]
@@ -835,6 +896,185 @@ mod tests {
 
         assert!(store.record(&ada).is_none());
         assert!(!dir.path().join(".crm").join("personal~ada.json").exists());
+    }
+
+    #[test]
+    fn a_star_survives_reopening_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let ada = card("personal", "ada");
+        let mut store = CrmStore::open(dir.path());
+        assert!(!store.is_favorite(std::slice::from_ref(&ada)));
+
+        store
+            .set_favorite(std::slice::from_ref(&ada), true)
+            .unwrap();
+        assert!(CrmStore::open(dir.path()).is_favorite(std::slice::from_ref(&ada)));
+    }
+
+    /// Unstarring the only thing on a record removes the file, and
+    /// unstarring somebody who was never starred does not create one.
+    #[test]
+    fn unstarring_leaves_no_record_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ada, bob) = (card("personal", "ada"), card("personal", "bob"));
+        let mut store = CrmStore::open(dir.path());
+        store
+            .set_favorite(std::slice::from_ref(&ada), true)
+            .unwrap();
+        store
+            .set_favorite(&[ada.clone(), bob.clone()], false)
+            .unwrap();
+
+        assert!(!store.is_favorite(&[ada, bob.clone()]));
+        assert!(
+            store.record(&bob).is_none(),
+            "a record was made for nothing"
+        );
+        assert!(
+            std::fs::read_dir(dir.path().join(".crm"))
+                .map(|d| d.count() == 0)
+                .unwrap_or(true),
+            "an emptied record left a file behind"
+        );
+    }
+
+    /// A star is not a note: it must not disturb what else is recorded, and
+    /// a record holding only a star is still a record worth keeping.
+    #[test]
+    fn a_star_sits_beside_the_notes_without_touching_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let ada = card("personal", "ada");
+        let mut store = CrmStore::open(dir.path());
+        store.add_note(&ada, "Met at the museum", at(1)).unwrap();
+        store
+            .set_favorite(std::slice::from_ref(&ada), true)
+            .unwrap();
+        store
+            .set_favorite(std::slice::from_ref(&ada), false)
+            .unwrap();
+
+        let reopened = CrmStore::open(dir.path());
+        assert_eq!(reopened.record(&ada).unwrap().notes.len(), 1);
+        assert!(!reopened.is_favorite(&[ada]));
+    }
+
+    /// A record written before favorites existed has no such field and
+    /// reads as not starred.
+    #[test]
+    fn a_record_from_before_favorites_reads_as_not_starred() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".crm")).unwrap();
+        std::fs::write(
+            dir.path().join(".crm").join("personal~ada.json"),
+            r#"{"notes":[],"interactions":[],"cadence_days":30,"attachments":[]}"#,
+        )
+        .unwrap();
+
+        let store = CrmStore::open(dir.path());
+        assert!(store.read_every_record());
+        assert!(!store.is_favorite(&[card("personal", "ada")]));
+    }
+
+    /// Starring stars every card of the person, so the star is still there
+    /// on whichever card a delete or an unlink leaves.
+    #[test]
+    fn a_star_is_on_every_card_of_the_person() {
+        let dir = tempfile::tempdir().unwrap();
+        let (work, home) = (card("work", "ada"), card("personal", "ada"));
+        let mut store = CrmStore::open(dir.path());
+        store
+            .set_favorite(&[work.clone(), home.clone()], true)
+            .unwrap();
+
+        store.forget(&work).unwrap();
+        assert!(store.is_favorite(std::slice::from_ref(&home)));
+        assert!(
+            store.is_favorite(&[work, home]),
+            "any card starred is enough"
+        );
+    }
+
+    /// Deleting a contact is undoable, and the undo has to bring the star
+    /// back with the card — it travels in the record, like the notes.
+    #[test]
+    fn a_star_comes_back_with_an_undone_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let ada = card("personal", "ada");
+        let mut store = CrmStore::open(dir.path());
+        store
+            .set_favorite(std::slice::from_ref(&ada), true)
+            .unwrap();
+
+        let kept = store.record(&ada).cloned().expect("a record to keep");
+        store.forget(&ada).unwrap();
+        assert!(!CrmStore::open(dir.path()).is_favorite(std::slice::from_ref(&ada)));
+
+        store.restore(&ada, kept).unwrap();
+        assert!(CrmStore::open(dir.path()).is_favorite(&[ada]));
+    }
+
+    /// A star that could not be written must not show as set.
+    #[test]
+    fn a_star_that_could_not_be_written_is_not_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = card("personal", "ada");
+        let mut store = unwritable(dir.path(), &c);
+
+        assert!(store.set_favorite(std::slice::from_ref(&c), true).is_err());
+        assert!(!store.is_favorite(&[c]));
+    }
+
+    fn row(book: &str, uid: &str) -> Contact {
+        let mut contact = Contact::draft(book);
+        contact.uid = uid.to_owned();
+        contact
+    }
+
+    fn uids(rows: &[Contact]) -> Vec<&str> {
+        rows.iter().map(|c| c.uid.as_str()).collect()
+    }
+
+    /// Starred people lead the list; each half keeps the order it came in.
+    #[test]
+    fn starred_rows_lead_the_list_in_their_own_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = CrmStore::open(dir.path());
+        let links = LinkStore::open(dir.path());
+        let mut rows = vec![
+            row("personal", "ada"),
+            row("personal", "bob"),
+            row("personal", "cy"),
+            row("personal", "dee"),
+        ];
+        assert_eq!(favorites_first(&mut rows, &store, &links), 0);
+        assert_eq!(uids(&rows), ["ada", "bob", "cy", "dee"]);
+
+        store
+            .set_favorite(&[card("personal", "dee")], true)
+            .unwrap();
+        store
+            .set_favorite(&[card("personal", "bob")], true)
+            .unwrap();
+        assert_eq!(favorites_first(&mut rows, &store, &links), 2);
+        assert_eq!(uids(&rows), ["bob", "dee", "ada", "cy"]);
+    }
+
+    /// The row is the person. When the starred card is one the filter has
+    /// hidden, the person's visible card still leads the list.
+    #[test]
+    fn a_row_is_starred_when_any_card_of_its_person_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = CrmStore::open(dir.path());
+        let mut links = LinkStore::open(dir.path());
+        links
+            .link(vec![card("work", "ada-w"), card("personal", "ada-p")])
+            .unwrap();
+        store.set_favorite(&[card("work", "ada-w")], true).unwrap();
+
+        // Filtered to the personal book: the work card is not among the rows.
+        let mut rows = vec![row("personal", "aaron"), row("personal", "ada-p")];
+        assert_eq!(favorites_first(&mut rows, &store, &links), 1);
+        assert_eq!(uids(&rows), ["ada-p", "aaron"]);
     }
 
     /// The whole point of `.crm/`: it is Circle's own data and must stay

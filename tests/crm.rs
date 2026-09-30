@@ -170,6 +170,83 @@ fn linking_unions_history_and_unlinking_returns_it() {
     assert_eq!(summarise(&crm, &[work]).notes.len(), 1);
 }
 
+/// The storage decision for favorites: local, in `.crm/`, this device only.
+/// A star must leave the card's bytes alone, so nothing about it can sync.
+#[test]
+fn a_star_never_reaches_the_card() {
+    let fixture = fixture();
+    let before = fixture.raw("ada@home");
+    let ada = fixture.card("ada@home");
+
+    let mut crm = CrmStore::open(&fixture.root);
+    crm.set_favorite(std::slice::from_ref(&ada), true)
+        .expect("star");
+
+    let store = ContactStore::open(&fixture.root).expect("reopen");
+    let after = store
+        .contacts()
+        .into_iter()
+        .find(|c| c.uid == "ada@home")
+        .expect("the card is still there")
+        .raw;
+    assert_eq!(after, before, "starring rewrote the contact's card");
+    assert_eq!(
+        store.books().len(),
+        2,
+        "the star's record was picked up as an address book"
+    );
+    assert!(
+        CrmStore::open(&fixture.root).is_favorite(&[ada]),
+        "the star did not survive a restart"
+    );
+}
+
+/// The star is on the person, whichever way their cards are arranged:
+/// linking a starred card to another stars the person, the star set on a
+/// linked person stays on each card when they come apart, and unstarring the
+/// person unstars all of it.
+#[test]
+fn a_star_survives_linking_and_unlinking() {
+    let fixture = fixture();
+    let (home, work) = (fixture.card("ada@home"), fixture.card("ada@work"));
+    let mut crm = CrmStore::open(&fixture.root);
+    let mut links = LinkStore::open(&fixture.root);
+
+    // Starred alone, then linked: the person is starred, whichever card the
+    // row stands on.
+    crm.set_favorite(&links.cards_of_person(&home.book, &home.uid), true)
+        .expect("star the home card");
+    links
+        .link(vec![work.clone(), home.clone()])
+        .expect("link the pair");
+    assert!(crm.is_favorite(&links.cards_of_person(&work.book, &work.uid)));
+
+    // Unlinked: the star stays with the card it was put on, and only there.
+    links.unlink(&work.book, &work.uid).expect("unlink");
+    assert!(crm.is_favorite(&links.cards_of_person(&home.book, &home.uid)));
+    assert!(!crm.is_favorite(&links.cards_of_person(&work.book, &work.uid)));
+
+    // Starred as a linked person: both cards carry it, so it survives the
+    // cards coming apart, and the deletion of either.
+    links
+        .link(vec![work.clone(), home.clone()])
+        .expect("link again");
+    crm.set_favorite(&links.cards_of_person(&work.book, &work.uid), true)
+        .expect("star the person");
+    links.unlink(&home.book, &home.uid).expect("unlink again");
+    assert!(crm.is_favorite(std::slice::from_ref(&home)));
+    assert!(crm.is_favorite(std::slice::from_ref(&work)));
+
+    // Unstarring the person clears every card, so no card brings it back.
+    links
+        .link(vec![work.clone(), home.clone()])
+        .expect("link a third time");
+    crm.set_favorite(&links.cards_of_person(&home.book, &home.uid), false)
+        .expect("unstar the person");
+    let reopened = CrmStore::open(&fixture.root);
+    assert!(!reopened.is_favorite(&[home, work]));
+}
+
 /// Overdue is a question about today, asked of the data — not a flag stored
 /// on anything.
 #[test]
