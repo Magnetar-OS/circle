@@ -159,6 +159,70 @@ fn editing_a_grouped_value_rewrites_it_in_place_and_keeps_its_label() {
     );
 }
 
+/// A card whose one label covers `values.len()` email lines.
+fn shared_group_card(values: &[&str]) -> String {
+    let mut card =
+        String::from("BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada@server\r\nFN:Ada Lovelace\r\n");
+    for value in values {
+        card.push_str(&format!("item1.EMAIL;type=INTERNET:{value}\r\n"));
+    }
+    card.push_str("item1.X-ABLabel:Both\r\nEND:VCARD\r\n");
+    card
+}
+
+/// Empties the `index`-th of the shared group's rows in the editor, saves,
+/// and returns what the editor saved and the card on disk (its REV aside).
+fn empty_shared_row(card: &str, index: usize) -> (Vec<String>, String) {
+    let mut fixture = fixture();
+    write_contact_raw(&fixture.book, "ada.vcf", card).expect("seed the shared group");
+    fixture.store.refresh();
+
+    let mut editor = fixture.editor();
+    editor.update(Message::ListValue(ListKind::Email, index, "  ".into()));
+    let saved = editor.finish();
+    fixture.store.save(&saved).expect("save");
+
+    let disk = fixture
+        .on_disk()
+        .split_inclusive("\r\n")
+        .filter(|line| !line.starts_with("REV:"))
+        .collect();
+    (saved.emails.into_iter().map(|e| e.value).collect(), disk)
+}
+
+/// Emptying one of two values under one label. It was dropped like a blank
+/// row, leaving the group one value short, and the patcher wrote the other
+/// value over both lines: `b` twice, and `a` gone without the editor having
+/// offered to remove it. It keeps its value now, as the editor says.
+#[test]
+fn emptying_one_of_two_values_sharing_a_group_keeps_it_and_does_not_duplicate_the_other() {
+    let card = shared_group_card(&["ada@one.example", "ada@two.example"]);
+    let (saved, disk) = empty_shared_row(&card, 0);
+
+    assert_eq!(saved, ["ada@one.example", "ada@two.example"]);
+    assert_eq!(disk, card, "the group was rewritten");
+    assert_eq!(disk.matches("ada@two.example").count(), 1, "{disk}");
+}
+
+/// Three values under one label, the middle one emptied. The patcher saw two
+/// values for three lines and changed nothing, so the value the editor showed
+/// as gone was back on the next read. What is saved is now what the editor
+/// said it would save: every line as it was.
+#[test]
+fn emptying_one_of_three_values_sharing_a_group_keeps_it_as_the_editor_says() {
+    let card = shared_group_card(&["ada@one.example", "ada@two.example", "ada@three.example"]);
+    let (saved, disk) = empty_shared_row(&card, 1);
+
+    assert_eq!(
+        saved,
+        ["ada@one.example", "ada@two.example", "ada@three.example"]
+    );
+    assert_eq!(disk, card, "the group was rewritten");
+    for value in ["ada@one.example", "ada@two.example", "ada@three.example"] {
+        assert_eq!(disk.matches(value).count(), 1, "{value} in:\n{disk}");
+    }
+}
+
 /// Two lines of one property under one label (audit S-04). Editing one of
 /// them in the editor and saving rewrites that line only: the patcher used to
 /// set every line of the group to the last value on any save, so the other

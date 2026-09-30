@@ -37,6 +37,12 @@
 //! One case has no remove button: two entries of one kind sharing a group.
 //! The card cannot say which of the two lines a removal meant, so neither is
 //! offered — a remove that took both, or neither, would be worse than none.
+//! Emptying such an entry is the same request by other means, so it gets the
+//! same answer: the row says it cannot be removed on its own, and the save
+//! keeps the value the card had ([`State::finish`]). Dropped instead, it left
+//! the group one value short: with two lines the patcher wrote the other
+//! value over both, and with three it changed nothing, so the emptied value
+//! was back on the next read.
 
 use cosmic::Element;
 use cosmic::iced::Length;
@@ -173,6 +179,9 @@ pub struct State {
     /// line another writer adds to the card meanwhile was never in this list,
     /// so it is not mistaken for one the user took out.
     opened_groups: Vec<GroupedEntry>,
+    /// The contact as the editor opened it: what an emptied entry that
+    /// shares its group goes back to on save.
+    opened: Contact,
 }
 
 impl State {
@@ -187,6 +196,7 @@ impl State {
         let (ids, names) = writable(books);
         Self {
             opened_groups: contact.grouped_entries(),
+            opened: contact.clone(),
             contact,
             is_new: false,
             birthday_text,
@@ -205,6 +215,7 @@ impl State {
         let (ids, names) = writable(books);
         Self {
             opened_groups: Vec::new(),
+            opened: Contact::draft(book_id),
             contact: Contact::draft(book_id),
             is_new: true,
             birthday_text: String::new(),
@@ -264,9 +275,36 @@ impl State {
     /// An unparseable birthday clears the field rather than blocking the save:
     /// the text is visible in the editor, and refusing to save a contact
     /// because of a mistyped date would strand every other edit on the card.
+    ///
+    /// An emptied entry that shares its group with another of its kind is
+    /// not dropped with the other blank rows: it keeps the value the card
+    /// had — see the module docs.
     #[must_use]
     pub fn finish(&self) -> Contact {
         let mut contact = self.contact.clone();
+
+        let opened = &self.opened;
+        let typed_group = |e: &Typed| e.group.clone();
+        let typed_empty = |e: &Typed| e.value.trim().is_empty();
+        keep_shared(
+            &mut contact.emails,
+            &opened.emails,
+            typed_group,
+            typed_empty,
+        );
+        keep_shared(
+            &mut contact.phones,
+            &opened.phones,
+            typed_group,
+            typed_empty,
+        );
+        keep_shared(&mut contact.urls, &opened.urls, typed_group, typed_empty);
+        keep_shared(
+            &mut contact.addresses,
+            &opened.addresses,
+            |a: &Address| a.group.clone(),
+            Address::is_empty,
+        );
 
         contact.birthday = if self.birthday_text.trim().is_empty() {
             None
@@ -434,6 +472,46 @@ fn writable(books: &[CalendarMeta]) -> (Vec<String>, Vec<String>) {
         .filter(|b| !b.read_only)
         .map(|b| (b.id.clone(), b.name.clone()))
         .unzip()
+}
+
+/// Puts back what the card held for every emptied row that shares its group.
+///
+/// Rows that share a group cannot be removed (see [`shares_group`]), so the
+/// n-th row of a group in `rows` is the n-th row of that group as opened.
+fn keep_shared<T: Clone>(
+    rows: &mut [T],
+    opened: &[T],
+    group: impl Fn(&T) -> Option<String>,
+    empty: impl Fn(&T) -> bool,
+) {
+    let groups: Vec<Option<String>> = rows.iter().map(&group).collect();
+    for index in 0..rows.len() {
+        let Some(name) = groups[index].as_deref() else {
+            continue;
+        };
+        if !empty(&rows[index]) || !shares_group(groups.iter().map(Option::as_deref), index) {
+            continue;
+        }
+        let nth = groups[..index]
+            .iter()
+            .filter(|g| g.as_deref() == Some(name))
+            .count();
+        if let Some(original) = opened
+            .iter()
+            .filter(|row| group(row).as_deref() == Some(name))
+            .nth(nth)
+        {
+            rows[index] = original.clone();
+        }
+    }
+}
+
+/// The note under an emptied row that shares its group: what the save will
+/// do with it instead of removing it.
+fn shared_group_note<'a>() -> Element<'a, Message> {
+    widget::text::caption(fl!("shared-group-kept"))
+        .class(cosmic::theme::Text::Custom(super::dim_text))
+        .into()
 }
 
 /// Whether the entry at `index` is grouped and another entry of the same list
@@ -629,7 +707,8 @@ fn typed_section<'a>(
         }
         // Grouped or not, an entry can be removed — see the module docs for
         // the one that cannot.
-        if !shares_group(values.iter().map(|e| e.group.as_deref()), index) {
+        let shared = shares_group(values.iter().map(|e| e.group.as_deref()), index);
+        if !shared {
             row = row.push(widget::tooltip(
                 widget::button::icon(crate::ui::icon("list-remove-symbolic"))
                     .on_press(Message::ListRemove(kind, index)),
@@ -639,6 +718,9 @@ fn typed_section<'a>(
         }
 
         section = section.add(row);
+        if shared && entry.value.trim().is_empty() {
+            section = section.add(shared_group_note());
+        }
     }
 
     section = section.add(widget::button::text(add_label).on_press(Message::ListAdd(kind)));
@@ -754,6 +836,8 @@ fn address_section(state: &State) -> Element<'_, Message> {
         if !shares_group(addresses.iter().map(|a| a.group.as_deref()), index) {
             block = block
                 .push(widget::button::text(fl!("remove")).on_press(Message::AddressRemove(index)));
+        } else if address.is_empty() {
+            block = block.push(shared_group_note());
         }
 
         section = section.add(block);
@@ -1172,6 +1256,45 @@ END:VCARD\r\n";
         state.update(Message::AddressRemove(1));
         assert_eq!(state.contact.emails.len(), 2);
         assert_eq!(state.contact.addresses.len(), 2);
+        assert!(state.removed_groups().is_empty());
+    }
+
+    /// Emptying a row that shares its group asks for the removal the editor
+    /// does not offer; the save keeps the value the card had, for addresses
+    /// as for the typed lists. An edited sibling keeps its edit.
+    #[test]
+    fn an_emptied_entry_sharing_a_group_keeps_its_value() {
+        let shared = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\n\
+item1.EMAIL:ada@one.example\r\nitem1.EMAIL:ada@two.example\r\nitem1.X-ABLabel:Both\r\n\
+EMAIL:ada@plain.example\r\n\
+item2.ADR:;;1 Main St;Athens;;;GR\r\nitem2.ADR:;;2 Side St;Patras;;;GR\r\n\
+END:VCARD\r\n";
+        let mut state = editing(shared);
+        let opened = state.contact.clone();
+
+        state.update(Message::ListValue(ListKind::Email, 0, String::new()));
+        state.update(Message::ListValue(
+            ListKind::Email,
+            1,
+            "ada@second.example".into(),
+        ));
+        state.update(Message::ListValue(ListKind::Email, 2, String::new()));
+        for part in [
+            AddressPart::Street,
+            AddressPart::Locality,
+            AddressPart::Country,
+        ] {
+            state.update(Message::AddressPart(1, part, String::new()));
+        }
+
+        let finished = state.finish();
+        let emails: Vec<&str> = finished.emails.iter().map(|e| e.value.as_str()).collect();
+        assert_eq!(
+            emails,
+            ["ada@one.example", "ada@second.example"],
+            "the shared row was dropped, or the ungrouped blank one kept"
+        );
+        assert_eq!(finished.addresses, opened.addresses);
         assert!(state.removed_groups().is_empty());
     }
 

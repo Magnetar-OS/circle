@@ -230,7 +230,9 @@ Two things that patcher does shape what the editor offers:
   websites and addresses alike. If the group also holds something else, only the entry's
   own line goes and the rest is left as it was. The one grouped entry with no
   remove button is one that shares its group with another entry of the same
-  kind: the card cannot say which line was meant.
+  kind: the card cannot say which line was meant. Emptying it asks for the
+  same thing, so the save keeps its value and the editor says so under the
+  row.
 
 The detail pane and the editor both end with a short list of the properties the
 card carries that Circle will not touch, so what is being preserved is visible

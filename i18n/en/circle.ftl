@@ -117,6 +117,9 @@ add-phone = Add a phone number
 add-address = Add an address
 add-url = Add a website
 add-nickname = Add a nickname
+shared-group-kept =
+    This entry shares its label with another and cannot be removed on its
+    own. Saving keeps its previous value.
 
 photo = Photo
 set-photo = Set photo…
