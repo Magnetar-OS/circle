@@ -4,7 +4,9 @@
 
 use cosmic::app::Task;
 use cosmic::widget;
-use cosmic_pim_core::store::contacts::ContactStore;
+use cosmic_pim_core::model::CalendarMeta;
+use cosmic_pim_core::store::StoreError;
+use cosmic_pim_core::store::contacts::{ContactStore, write_contact_raw};
 
 use super::sync::write_and_queue;
 use super::{AppModel, ContactKey, DeletedCard, Message, UNDO_DEPTH};
@@ -149,17 +151,7 @@ impl AppModel {
                 continue;
             };
             let restoring = write_and_queue(&root, &card.book, &[&card.file_name], || {
-                // Merged into the file's current contents rather than written
-                // over them, for the same reason the segment was stored: the
-                // people who shared this file with the deleted card are still
-                // in it, and may have been edited since.
-                let current = std::fs::read_to_string(meta.path.join(&card.file_name)).ok();
-                let restored = restore_into(current.as_deref(), &card.raw, &card.uid);
-                cosmic_pim_core::store::contacts::write_contact_raw(
-                    &meta,
-                    &card.file_name,
-                    &restored,
-                )
+                restore_card(&meta, &card)
             });
             match restoring {
                 Ok(((), queued)) => {
@@ -217,6 +209,24 @@ fn has_linked_cards_left(
 /// export it emits a card rather than nothing.
 pub(super) fn card_segment(raw: &str, uid: &str) -> String {
     cosmic_pim_core::vcard::card_segment(raw, uid).unwrap_or_else(|| raw.to_owned())
+}
+
+/// Writes a deleted card back into its file.
+///
+/// Merged into the file's current contents rather than written over them,
+/// for the same reason the segment was stored: the people who shared this
+/// file with the deleted card are still in it, and may have been edited
+/// since. A file that is there but cannot be read is an error, not an
+/// absent one: it may hold those people, and the card alone would replace
+/// them.
+fn restore_card(meta: &CalendarMeta, card: &DeletedCard) -> Result<(), StoreError> {
+    let current = match std::fs::read_to_string(meta.path.join(&card.file_name)) {
+        Ok(text) => Some(text),
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => None,
+        Err(why) => return Err(why.into()),
+    };
+    let restored = restore_into(current.as_deref(), &card.raw, &card.uid);
+    write_contact_raw(meta, &card.file_name, &restored)
 }
 
 /// A deleted card put back into whatever its file now holds.
@@ -291,6 +301,34 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             "the deleted card did not come back"
         );
         assert_eq!(restored.matches("BEGIN:VCARD").count(), 2);
+    }
+
+    /// A file that is there but cannot be read — bytes that are not UTF-8
+    /// — may hold other people. The undo read it as absent and wrote the
+    /// deleted card alone over it, deleting them.
+    #[test]
+    fn an_undo_into_a_file_that_cannot_be_read_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Home", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        let unreadable = b"BEGIN:VCARD\r\nUID:ada\r\nFN:\xff\xfe\r\nEND:VCARD\r\n";
+        std::fs::write(book.path.join("both.vcf"), unreadable).unwrap();
+
+        let card = DeletedCard {
+            book: book.id.clone(),
+            uid: "bob".to_owned(),
+            file_name: "both.vcf".to_owned(),
+            raw: card_segment(TWO, "bob"),
+            crm: None,
+        };
+        assert!(restore_card(&book, &card).is_err());
+        assert_eq!(
+            std::fs::read(book.path.join("both.vcf")).unwrap(),
+            unreadable,
+            "the undo wrote over a file it could not read"
+        );
     }
 
     #[test]

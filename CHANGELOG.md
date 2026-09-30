@@ -39,6 +39,9 @@ All notable changes to this project are documented here. The format follows
   Each change and its upload are now one step, which a sync pass waits for.
   A contact updated by importing a `.vcf` into a synced address book is also
   merged automatically when the server changed it meanwhile, like an edit.
+- Undoing a delete into a `.vcf` that is there but cannot be read (not valid
+  UTF-8) is refused with an error. It wrote the deleted card alone over the
+  file, removing whoever else it held.
 
 ## [1.2.0] - 2026-09-29
 
