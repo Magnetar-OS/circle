@@ -8,7 +8,7 @@ use cosmic_pim_core::store::contacts::ContactStore;
 use cosmic_pim_core::vcard::parse_vcards;
 
 use super::save::save_error;
-use super::sync::{queue_created, write_and_queue};
+use super::sync::{Unqueued, keep_unqueued, write_and_queue, write_and_queue_creating};
 use super::{AppModel, Message};
 use crate::fl;
 use crate::ui::csv;
@@ -46,10 +46,7 @@ impl AppModel {
                     added = summary.added.to_string(),
                     updated = summary.updated.to_string()
                 ));
-                match queued {
-                    Err(why) => Task::batch([done, self.toast(why)]),
-                    Ok(()) => done,
-                }
+                self.also_unqueued(done, queued.err())
             }
             Err(why) => self.toast(why.to_string()),
         }
@@ -82,7 +79,7 @@ impl AppModel {
 
         let mut added = 0usize;
         let mut updated = 0usize;
-        let mut queue_error: Option<String> = None;
+        let mut unqueued = None;
         for mut contact in contacts {
             // A mapped UID that already exists means "update that contact":
             // the row is laid over it, so the save patches losslessly and
@@ -96,11 +93,7 @@ impl AppModel {
             match write_and_queue(&root, &book_id, &[&contact.file_name], || {
                 store.save_as(&contact, version)
             }) {
-                Ok(((), queued)) => {
-                    if let Err(why) = queued {
-                        queue_error.get_or_insert(why);
-                    }
-                }
+                Ok(((), queued)) => keep_unqueued(&mut unqueued, queued),
                 Err(why) => {
                     self.csv = None;
                     self.reload();
@@ -118,25 +111,23 @@ impl AppModel {
             updated = updated.to_string(),
             skipped = skipped.to_string()
         ));
-        match queue_error {
-            Some(why) => Task::batch([done, self.toast(why)]),
-            None => done,
-        }
+        self.also_unqueued(done, unqueued)
     }
 }
 
 /// Imports a `.vcf` document into `book_id` and queues every file it wrote
-/// for upload; the queue's outcome as [`write_and_queue`] gives it.
+/// for upload, under the book's sync lock; the queue's outcome as
+/// [`write_and_queue`] gives it.
 ///
 /// The files of the cards this import updates are known before it runs, so
-/// their upload is queued with the write, under the book's sync lock, each
-/// with its pre-import text as the base. The files it adds get names it
-/// picks as it goes; those are queued once it returns.
+/// each is queued with its pre-import text as the base. The files it adds
+/// get names it picks as it goes, and are queued with them
+/// ([`write_and_queue_creating`]).
 fn import_and_queue(
     store: &mut ContactStore,
     book_id: &str,
     text: &str,
-) -> Result<(ImportSummary, Result<(), String>), cosmic_pim_sync::Error> {
+) -> Result<(ImportSummary, Result<(), Unqueued>), cosmic_pim_sync::Error> {
     let root = store.root().to_path_buf();
     let mut updating: Vec<String> = parse_vcards(text, book_id, "")
         .iter()
@@ -147,15 +138,12 @@ fn import_and_queue(
     updating.dedup();
     let names: Vec<&str> = updating.iter().map(String::as_str).collect();
 
-    let (summary, queued) =
-        write_and_queue(&root, book_id, &names, || store.import_vcf(text, book_id))?;
-    let queued = summary
-        .files
-        .iter()
-        .filter(|file| !updating.contains(file))
-        .map(|file| queue_created(store, book_id, file))
-        .fold(queued, Result::and);
-    Ok((summary, queued))
+    write_and_queue_creating(&root, book_id, &names, || {
+        store.import_vcf(text, book_id).map(|summary| {
+            let files = summary.files.clone();
+            (summary, files)
+        })
+    })
 }
 
 /// A path's file name, for messages — the full path is noise in a toast.

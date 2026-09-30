@@ -9,7 +9,7 @@ use cosmic_pim_core::patch::{GroupedEntry, remove_grouped};
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
-use super::sync::write_and_queue;
+use super::sync::{Unqueued, keep_unqueued, write_and_queue};
 use super::{AppModel, ContactKey, Message};
 use crate::fl;
 use crate::ui::dialogs::Dialog;
@@ -35,6 +35,7 @@ impl AppModel {
 
         let mut joined = 0usize;
         let mut first_error: Option<String> = None;
+        let mut unqueued = None;
         for key in keys {
             let Some(mut contact) = store.contact(&key.book, &key.uid) else {
                 continue;
@@ -47,9 +48,7 @@ impl AppModel {
                 store.save_as(&contact, version)
             }) {
                 Ok(((), queued)) => {
-                    if let Err(why) = queued {
-                        first_error.get_or_insert(why);
-                    }
+                    keep_unqueued(&mut unqueued, queued);
                     joined += 1;
                 }
                 Err(why) => {
@@ -62,14 +61,15 @@ impl AppModel {
         self.checked.clear();
         self.rebuild_nav();
         self.reload();
-        if let Some(why) = first_error {
-            return self.toast(why);
-        }
-        self.toast(fl!(
-            "added-to-group",
-            count = joined.to_string(),
-            name = name
-        ))
+        let task = match first_error {
+            Some(why) => self.toast(why),
+            None => self.toast(fl!(
+                "added-to-group",
+                count = joined.to_string(),
+                name = name
+            )),
+        };
+        self.also_unqueued(task, unqueued)
     }
 
     /// Commits the editor to the store.
@@ -137,8 +137,10 @@ impl AppModel {
                 return self.toast(save_error(&contact.label(), &why));
             }
         };
-        // Reported together — the save itself landed either way.
-        let queued = queued.and(removal);
+        // Reported beside whatever else happens — the save itself landed
+        // either way.
+        let mut unqueued = queued.err();
+        let removal = removal.err();
 
         if let Err(why) = photo {
             self.photos.remove(&ContactKey::of(&contact));
@@ -146,17 +148,18 @@ impl AppModel {
             self.selected = Some(ContactKey::of(&contact));
             self.reload();
             let photo = self.toast(fl!("error-photo", why = why));
-            return match queued {
-                Err(why) => Task::batch([photo, self.toast(why)]),
-                Ok(()) => photo,
+            let task = match removal {
+                Some(why) => Task::batch([photo, self.toast(why)]),
+                None => photo,
             };
+            return self.also_unqueued(task, unqueued);
         }
 
         // Membership lives on the GROUP cards, so the changed rows patch those
         // — only the changed ones, or every contact save would churn every
         // group file and push them all to the server unchanged.
         let membership_error =
-            apply_group_changes(store, &contact, &changed_groups).or(queued.err());
+            apply_group_changes(store, &contact, &changed_groups, &mut unqueued).or(removal);
 
         // The card's bytes just changed; a cached photo decoded from the old
         // bytes must not survive the save.
@@ -165,10 +168,8 @@ impl AppModel {
         self.selected = Some(ContactKey::of(&contact));
         self.rebuild_nav();
         self.reload();
-        if let Some(why) = membership_error {
-            return self.toast(why);
-        }
-        Task::none()
+        let task = membership_error.map_or_else(Task::none, |why| self.toast(why));
+        self.also_unqueued(task, unqueued)
     }
 }
 
@@ -246,11 +247,13 @@ fn apply_photo_edit(
 
 /// Applies the editor's membership toggles by patching each changed group
 /// card. Returns the first error's message, applying the rest regardless —
-/// one unwritable group should not strand the other toggles.
+/// one unwritable group should not strand the other toggles. A group card
+/// written but not queued for upload goes into `unqueued`.
 fn apply_group_changes(
     store: &mut ContactStore,
     contact: &Contact,
     changed: &[editor::GroupRow],
+    unqueued: &mut Option<Unqueued>,
 ) -> Option<String> {
     use cosmic_pim_core::vcard::{member_uid, member_uri};
 
@@ -277,11 +280,7 @@ fn apply_group_changes(
         match write_and_queue(&root, &contact.addressbook_id, &[&group.file_name], || {
             store.set_group_members(&contact.addressbook_id, &row.uid, &members)
         }) {
-            Ok(((), queued)) => {
-                if let Err(why) = queued {
-                    first_error.get_or_insert(why);
-                }
-            }
+            Ok(((), queued)) => keep_unqueued(unqueued, queued),
             Err(why) => {
                 first_error.get_or_insert_with(|| why.to_string());
             }

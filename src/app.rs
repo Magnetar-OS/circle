@@ -30,7 +30,7 @@ mod view;
 pub use sync::SyncSummary;
 
 use delete::card_segment;
-use sync::{queue_created, write_and_queue};
+use sync::{Unqueued, write_and_queue, write_and_queue_creating};
 use transfer::file_label;
 
 const APP_ID: &str = "com.magnetaros.Circle";
@@ -359,6 +359,9 @@ pub enum Message {
     FocusSearch,
     CloseToast(widget::ToastId),
     UndoDelete(u64),
+    /// A queue-failure toast's Retry: queue these saved changes for upload
+    /// again.
+    RetryUpload(Unqueued),
 
     ToggleBook(String),
     SortByGivenName(bool),
@@ -997,6 +1000,7 @@ impl AppModel {
             }
             Message::BackToList => self.selected = None,
             Message::UndoDelete(token) => return self.undo_delete(token),
+            Message::RetryUpload(unqueued) => return self.retry_upload(unqueued),
             Message::Copy(value) => return cosmic::iced::clipboard::write(value),
             // A burst of filesystem changes and an explicit refresh do the same
             // work; they are separate messages only so the logs distinguish
@@ -1764,8 +1768,8 @@ impl AppModel {
                     self.editor = None;
                     self.rebuild_nav();
                     self.reload();
-                    if let Err(why) = queued {
-                        return self.toast(why);
+                    if let Err(unqueued) = queued {
+                        return self.toast_unqueued(unqueued);
                     }
                 }
                 _ => return Task::none(),
@@ -1796,14 +1800,24 @@ impl AppModel {
                 let Some(book) = self.config.new_card_book(store.books()) else {
                     return self.toast(fl!("error-no-writable-book"));
                 };
-                let queued = match store.create_group(name.trim(), &book, version) {
-                    Ok(group) => queue_created(store, &book, &group.file_name),
+                // The group card's file is named as it is written, and queued
+                // with it under the book's lock.
+                let root = store.root().to_path_buf();
+                let queued = match write_and_queue_creating(&root, &book, &[], || {
+                    store
+                        .create_group(name.trim(), &book, version)
+                        .map(|group| {
+                            let file = group.file_name.clone();
+                            (group, vec![file])
+                        })
+                }) {
+                    Ok((_, queued)) => queued,
                     Err(why) => return self.toast(why.to_string()),
                 };
                 self.rebuild_nav();
                 self.reload();
-                if let Err(why) = queued {
-                    return self.toast(why);
+                if let Err(unqueued) = queued {
+                    return self.toast_unqueued(unqueued);
                 }
             }
         }

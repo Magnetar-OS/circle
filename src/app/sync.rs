@@ -78,6 +78,43 @@ impl AppModel {
             .map(Into::into)
     }
 
+    /// The toast for changes saved here but not queued for upload, with a
+    /// Retry that queues them again ([`requeue`]).
+    pub(super) fn toast_unqueued(&mut self, unqueued: Unqueued) -> Task<Message> {
+        let message = unqueued.to_string();
+        self.toasts
+            .push(
+                widget::Toast::new(message).action(fl!("retry-upload"), move |_| {
+                    Message::RetryUpload(unqueued.clone())
+                }),
+            )
+            .map(Into::into)
+    }
+
+    /// `task`, with the toast for `unqueued` beside it when there is one.
+    pub(super) fn also_unqueued(
+        &mut self,
+        task: Task<Message>,
+        unqueued: Option<Unqueued>,
+    ) -> Task<Message> {
+        match unqueued {
+            Some(unqueued) => Task::batch([task, self.toast_unqueued(unqueued)]),
+            None => task,
+        }
+    }
+
+    /// The toast's Retry: queues the files again, and says so again if that
+    /// fails too.
+    pub(super) fn retry_upload(&mut self, unqueued: Unqueued) -> Task<Message> {
+        let Some(store) = self.store.as_ref() else {
+            return Task::none();
+        };
+        match requeue(store, unqueued) {
+            Ok(()) => Task::none(),
+            Err(unqueued) => self.toast_unqueued(unqueued),
+        }
+    }
+
     /// Re-reads the shared account store before the Accounts page shows it.
     ///
     /// The handle lives as long as the window, and Slate, Envelope and every
@@ -195,9 +232,9 @@ fn reload_account_store(accounts: &mut cosmic_pim_accounts::AccountStore) -> Res
 /// state could not be opened and the write was not tried. `Ok` carries the
 /// write's value and whether its upload was queued: a failure to queue does
 /// not undo the local write — the card's text is not at risk — but comes
-/// back as a sentence for a toast, because the edit will not reach the server
-/// until the card is written again, and nobody would otherwise know. A
-/// local-only book queues nothing and is `Ok(())`.
+/// back as an [`Unqueued`] for a toast, because nobody would otherwise know
+/// the edit will not reach the server. A local-only book, or a write that
+/// left its files as they were, queues nothing and is `Ok(())`.
 ///
 /// `write` must not queue anything itself: the lock is held around it.
 pub(super) fn write_and_queue<T>(
@@ -205,31 +242,114 @@ pub(super) fn write_and_queue<T>(
     book_id: &str,
     file_names: &[&str],
     write: impl FnOnce() -> Result<T, StoreError>,
-) -> Result<(T, Result<(), String>), cosmic_pim_sync::Error> {
-    let saved = cosmic_pim_sync::save_and_queue(root, book_id, file_names, write)?;
+) -> Result<(T, Result<(), Unqueued>), cosmic_pim_sync::Error> {
+    write_and_queue_creating(root, book_id, file_names, || {
+        write().map(|value| (value, Vec::new()))
+    })
+}
+
+/// [`write_and_queue`], for a write that also creates files whose names it
+/// picks as it writes — a new group card, the new cards of an import.
+///
+/// `write` returns its value and the names of the files it created, and
+/// each of those is queued with the rest, under the same lock
+/// (`cosmic_pim_sync::save_and_queue_creating`). `file_names` are the files
+/// that may exist already.
+pub(super) fn write_and_queue_creating<T>(
+    root: &Path,
+    book_id: &str,
+    file_names: &[&str],
+    write: impl FnOnce() -> Result<(T, Vec<String>), StoreError>,
+) -> Result<(T, Result<(), Unqueued>), cosmic_pim_sync::Error> {
+    let mut touched: Vec<String> = file_names.iter().map(|&name| name.to_owned()).collect();
+    let saved = cosmic_pim_sync::save_and_queue_creating(root, book_id, file_names, || {
+        let (value, created) = write()?;
+        for name in &created {
+            if !touched.contains(name) {
+                touched.push(name.clone());
+            }
+        }
+        Ok::<_, StoreError>((value, created))
+    })?;
     let queued = saved
         .queued
         .map(|_| ())
-        .map_err(|why| fl!("error-queue-upload", why = why.to_string()));
+        .map_err(|why| Unqueued::new(book_id, touched, &why));
     Ok((saved.value, queued))
 }
 
-/// Queues a file a write has just *created* for upload.
+/// Changes saved on this device that did not get into their book's upload
+/// queue, and the first reason why.
 ///
-/// For the writes that choose their file's name themselves — a new group
-/// card, the new cards of an import — so the name is not known until the
-/// write returns and [`write_and_queue`] cannot be handed it. Queueing after
-/// the write is safe for these: a sync pass only pulls what the server
-/// lists, and the server has no resource by a name this device just made
-/// up. A failure to queue is returned as a sentence for a toast, as there.
-pub(super) fn queue_created(
-    store: &ContactStore,
-    book_id: &str,
-    file_name: &str,
-) -> Result<(), String> {
-    cosmic_pim_sync::queue_save(store.root(), book_id, file_name)
-        .map(|_| ())
-        .map_err(|why| fl!("error-queue-upload", why = why.to_string()))
+/// The server keeps its copy of each file until it is queued: by the
+/// toast's Retry ([`requeue`]), or by a later write that changes it. Saving
+/// the same bytes again queues nothing, because `save_and_queue` skips a
+/// file a write left as it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unqueued {
+    /// `(book id, file name)`, each once.
+    files: Vec<(String, String)>,
+    why: String,
+}
+
+impl Unqueued {
+    fn new(book_id: &str, files: Vec<String>, why: &dyn std::fmt::Display) -> Self {
+        Self {
+            files: files
+                .into_iter()
+                .map(|file| (book_id.to_owned(), file))
+                .collect(),
+            why: why.to_string(),
+        }
+    }
+
+    /// Takes `other`'s files in too, keeping this one's reason.
+    fn merge(&mut self, other: Self) {
+        for file in other.files {
+            if !self.files.contains(&file) {
+                self.files.push(file);
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Unqueued {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&fl!("error-queue-upload", why = self.why.as_str()))
+    }
+}
+
+/// Keeps a queue failure for one toast: the first reason, and every file.
+pub(super) fn keep_unqueued(slot: &mut Option<Unqueued>, queued: Result<(), Unqueued>) {
+    let Err(unqueued) = queued else {
+        return;
+    };
+    match slot {
+        Some(first) => first.merge(unqueued),
+        None => *slot = Some(unqueued),
+    }
+}
+
+/// Queues each of `unqueued`'s files for upload as it is now: its bytes if
+/// it is there, its deletion if it is gone. The explicit re-queue
+/// (`cosmic_pim_sync::queue_save`, `queue_delete`) for a change whose
+/// enqueue failed. What fails again comes back.
+pub(super) fn requeue(store: &ContactStore, unqueued: Unqueued) -> Result<(), Unqueued> {
+    let mut failed = None;
+    for (book_id, file) in unqueued.files {
+        let exists = store
+            .book(&book_id)
+            .is_some_and(|meta| meta.path.join(&file).exists());
+        let outcome = if exists {
+            cosmic_pim_sync::queue_save(store.root(), &book_id, &file)
+        } else {
+            cosmic_pim_sync::queue_delete(store.root(), &book_id, &file)
+        };
+        if let Err(why) = outcome {
+            keep_unqueued(&mut failed, Err(Unqueued::new(&book_id, vec![file], &why)));
+        }
+    }
+    failed.map_or(Ok(()), Err)
 }
 
 /// What a sync pass tells the UI thread.
@@ -540,9 +660,9 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
     }
 
     /// A book whose sync state cannot be read: a change that could never be
-    /// queued is refused before it is made, and a created file that cannot
-    /// be queued is reported. The helpers used to log that and carry on, so
-    /// nobody knew the edit would never reach the server.
+    /// queued is refused before it is made, and so is a write that creates
+    /// its file. The helpers used to log that and carry on, so nobody knew
+    /// the edit would never reach the server.
     #[test]
     fn a_write_that_cannot_be_queued_is_refused_or_reported() {
         use cosmic_pim_core::store::contacts::write_contact_raw;
@@ -565,9 +685,167 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             "the write went ahead with nothing to queue it"
         );
 
-        write_contact_raw(&book, "new.vcf", ONE).unwrap();
-        let err = queue_created(&store, &book.id, "new.vcf").unwrap_err();
-        assert!(!err.is_empty());
+        let refused = write_and_queue_creating(store.root(), &book.id, &[], || {
+            write_contact_raw(&book, "new.vcf", ONE).map(|()| ((), vec!["new.vcf".to_owned()]))
+        });
+        assert!(refused.is_err());
+        assert!(
+            !book.path.join("new.vcf").exists(),
+            "the created card was written with nothing to queue it"
+        );
+    }
+
+    /// A synced book holding Ada's card as the server last sent it.
+    fn synced_book_with_ada(
+        dir: &std::path::Path,
+    ) -> (ContactStore, cosmic_pim_core::model::CalendarMeta) {
+        use cosmic_pim_caldav::{CalDavStore as _, RemoteEvent, VdirStore};
+        let mut store = ContactStore::open(dir).unwrap();
+        let book = store
+            .create_book("Synced", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        let mut vdir = VdirStore::open_carddav(book.clone()).unwrap();
+        vdir.set_remote("/dav/ab/", false).unwrap();
+        vdir.upsert(&RemoteEvent {
+            href: "/dav/ab/ada.vcf".into(),
+            etag: "\"v1\"".into(),
+            ics: "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n".into(),
+        })
+        .unwrap();
+        store.refresh();
+        (store, book)
+    }
+
+    fn pending(
+        book: &cosmic_pim_core::model::CalendarMeta,
+    ) -> Vec<cosmic_pim_caldav::push::PushOp> {
+        use cosmic_pim_caldav::push::PushQueue as _;
+        cosmic_pim_caldav::VdirStore::open_carddav(book.clone())
+            .unwrap()
+            .pending()
+            .unwrap()
+            .into_iter()
+            .map(|push| push.op)
+            .collect()
+    }
+
+    /// A group card, or a card an import adds, is named as it is written.
+    /// It was queued in a second step, after the write and outside the
+    /// book's lock; it is written and queued inside it now.
+    #[test]
+    fn a_created_card_is_written_and_queued_inside_the_books_lock() {
+        use cosmic_pim_caldav::push::PushOp;
+        let dir = tempfile::tempdir().unwrap();
+        let (mut store, book) = synced_book_with_ada(dir.path());
+        let root = store.root().to_path_buf();
+        let held = |book: &cosmic_pim_core::model::CalendarMeta| {
+            std::fs::read_dir(&book.path)
+                .unwrap()
+                .flatten()
+                .filter(|entry| entry.file_name().to_string_lossy().ends_with(".lock"))
+                .any(|entry| {
+                    matches!(
+                        std::fs::File::open(entry.path()).unwrap().try_lock(),
+                        Err(std::fs::TryLockError::WouldBlock)
+                    )
+                })
+        };
+
+        let mut locked = false;
+        let (group, queued) = write_and_queue_creating(&root, &book.id, &[], || {
+            locked = held(&book);
+            store
+                .create_group(
+                    "Friends",
+                    &book.id,
+                    cosmic_pim_core::vcard::WriteVersion::V4,
+                )
+                .map(|group| {
+                    let file = group.file_name.clone();
+                    (group, vec![file])
+                })
+        })
+        .unwrap();
+        queued.unwrap();
+        assert!(locked, "the group card was written outside the book's lock");
+        assert!(
+            matches!(&pending(&book)[..], [PushOp::Put { file, .. }] if *file == group.file_name),
+            "{:?}",
+            pending(&book)
+        );
+    }
+
+    /// The toast used to say a change that failed to queue would wait "until
+    /// this contact is saved again". Saving the same bytes again queues
+    /// nothing now; Retry is what queues it, as it is on disk — an upload for
+    /// a card that is there, a deletion for one that is gone.
+    #[test]
+    fn a_change_that_was_not_queued_is_queued_by_retry_not_by_saving_it_again() {
+        use cosmic_pim_caldav::push::PushOp;
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+        const EDITED: &str =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n";
+        let dir = tempfile::tempdir().unwrap();
+        let (store, book) = synced_book_with_ada(dir.path());
+        // The edit is on disk; its enqueue failed.
+        write_contact_raw(&book, "ada.vcf", EDITED).unwrap();
+
+        let ((), queued) = write_and_queue(store.root(), &book.id, &["ada.vcf"], || {
+            write_contact_raw(&book, "ada.vcf", EDITED)
+        })
+        .unwrap();
+        queued.unwrap();
+        assert!(
+            pending(&book).is_empty(),
+            "the same bytes were queued again"
+        );
+
+        let unqueued = Unqueued::new(&book.id, vec!["ada.vcf".to_owned()], &"disk full");
+        assert!(unqueued.to_string().contains("disk full"));
+        requeue(&store, unqueued).unwrap();
+        assert!(
+            matches!(&pending(&book)[..], [PushOp::Put { file, .. }] if file == "ada.vcf"),
+            "{:?}",
+            pending(&book)
+        );
+
+        std::fs::remove_file(book.path.join("ada.vcf")).unwrap();
+        requeue(
+            &store,
+            Unqueued::new(&book.id, vec!["ada.vcf".to_owned()], &"disk full"),
+        )
+        .unwrap();
+        assert!(
+            matches!(&pending(&book)[..], [PushOp::Delete { .. }]),
+            "{:?}",
+            pending(&book)
+        );
+    }
+
+    /// One toast for a batch: the first reason, every file once.
+    #[test]
+    fn queue_failures_gather_into_one() {
+        let mut slot = None;
+        keep_unqueued(&mut slot, Ok(()));
+        assert!(slot.is_none());
+        keep_unqueued(
+            &mut slot,
+            Err(Unqueued::new("a", vec!["x.vcf".into()], &"first")),
+        );
+        keep_unqueued(
+            &mut slot,
+            Err(Unqueued::new(
+                "a",
+                vec!["x.vcf".into(), "y.vcf".into()],
+                &"second",
+            )),
+        );
+        let gathered = slot.unwrap();
+        assert_eq!(gathered.why, "first");
+        assert_eq!(
+            gathered.files,
+            vec![("a".into(), "x.vcf".into()), ("a".into(), "y.vcf".into())]
+        );
     }
 
     /// An account added by Slate while Circle is open shows up on Circle's

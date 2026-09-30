@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built against cosmic-pim 2.2. Saving a contact without changing it no
+  longer queues an upload.
+
+### Fixed
+
+- When a saved change cannot be queued for upload, the message says what
+  is true now and offers **Retry**, which queues it again. It used to say
+  the server would keep its copy until the contact was saved again, but
+  saving an unchanged contact queues nothing.
+- A new group, and the new cards of a `.vcf` import, are written and queued
+  for upload in one step under the address book's lock, like every other
+  change. They used to be written first and queued in a second step.
+
 ## [1.3.0] - 2026-09-30
 
 ### Changed

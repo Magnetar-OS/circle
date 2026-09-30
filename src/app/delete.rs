@@ -8,7 +8,7 @@ use cosmic_pim_core::model::CalendarMeta;
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::{ContactStore, write_contact_raw};
 
-use super::sync::write_and_queue;
+use super::sync::{keep_unqueued, write_and_queue};
 use super::{AppModel, ContactKey, DeletedCard, Message, UNDO_DEPTH};
 use crate::fl;
 
@@ -26,6 +26,7 @@ impl AppModel {
         let mut label = String::new();
         let mut first_error: Option<String> = None;
         let mut side_error: Option<String> = None;
+        let mut unqueued = None;
         for key in &keys {
             let Some(contact) = store.contact(&key.book, &key.uid) else {
                 continue;
@@ -38,13 +39,9 @@ impl AppModel {
             match write_and_queue(&root, &key.book, &[&contact.file_name], || {
                 store.delete(&key.book, &key.uid)
             }) {
-                Ok(((), queued)) => {
-                    // Reported beside the undo toast, not instead of it: the
-                    // card is already gone locally and must stay undoable.
-                    if let Err(why) = queued {
-                        side_error.get_or_insert(why);
-                    }
-                }
+                // Reported beside the undo toast, not instead of it: the card
+                // is already gone locally and must stay undoable.
+                Ok(((), queued)) => keep_unqueued(&mut unqueued, queued),
                 Err(why) => {
                     first_error.get_or_insert_with(|| {
                         fl!(
@@ -90,7 +87,8 @@ impl AppModel {
         // a batch could not be deleted.
         let error = first_error.or(side_error);
         if removed.is_empty() {
-            return error.map_or_else(Task::none, |why| self.toast(why));
+            let task = error.map_or_else(Task::none, |why| self.toast(why));
+            return self.also_unqueued(task, unqueued);
         }
 
         let message =
@@ -127,10 +125,11 @@ impl AppModel {
                     .action(fl!("undo"), move |_| Message::UndoDelete(token)),
             )
             .map(Into::into);
-        match error {
+        let task = match error {
             Some(why) => Task::batch([undo, self.toast(why)]),
             None => undo,
-        }
+        };
+        self.also_unqueued(task, unqueued)
     }
 
     /// Puts a deletion's cards back, byte for byte, and re-queues them for
@@ -145,6 +144,7 @@ impl AppModel {
         let root = store.root().to_path_buf();
 
         let mut first_error = None;
+        let mut unqueued = None;
         for card in cards {
             let Some(meta) = store.book(&card.book).cloned() else {
                 first_error.get_or_insert_with(|| fl!("error-load-contacts"));
@@ -155,9 +155,7 @@ impl AppModel {
             });
             match restoring {
                 Ok(((), queued)) => {
-                    if let Err(why) = queued {
-                        first_error.get_or_insert(why);
-                    }
+                    keep_unqueued(&mut unqueued, queued);
                     if let Some(record) = card.crm {
                         let card = crate::links::CardRef {
                             book: card.book.clone(),
@@ -176,10 +174,8 @@ impl AppModel {
 
         self.rebuild_nav();
         self.reload();
-        if let Some(why) = first_error {
-            return self.toast(why);
-        }
-        Task::none()
+        let task = first_error.map_or_else(Task::none, |why| self.toast(why));
+        self.also_unqueued(task, unqueued)
     }
 }
 
