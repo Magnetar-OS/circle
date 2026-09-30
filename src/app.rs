@@ -208,6 +208,9 @@ pub struct AppModel {
     /// Connect is not installed or nothing is in range, which is the normal
     /// case — the SMS action simply is not offered.
     phones: Vec<crate::kdeconnect::Device>,
+    /// Whether an installed application opens `geo:` URIs, found once at
+    /// start-up. Without one, addresses offer no "Show on the map".
+    can_map: bool,
     /// Accounts and credentials, shared with Slate — one `accounts.toml` for
     /// the whole suite. `None` when the account store could not be opened; the
     /// address book still works, it just cannot sync.
@@ -420,6 +423,7 @@ pub enum Message {
     AddNote,
     RemoveNote(String),
     PhonesFound(Vec<crate::kdeconnect::Device>),
+    MapsFound(bool),
     SmsRequested(String),
     SmsBody(String),
     SmsSend,
@@ -576,6 +580,7 @@ impl cosmic::Application for AppModel {
             note_draft: String::new(),
             relations: Vec::new(),
             phones: Vec::new(),
+            can_map: false,
             folded: HashMap::new(),
             review: None,
             accounts,
@@ -626,6 +631,15 @@ impl cosmic::Application for AppModel {
             // button, not an error.
             cosmic::task::future(async {
                 Message::PhonesFound(crate::kdeconnect::devices().await)
+            }),
+            // The same for a maps application: every desktop entry is read,
+            // so not on the UI thread.
+            cosmic::task::future(async {
+                let found = tokio::task::spawn_blocking(crate::maps::handler_installed).await;
+                Message::MapsFound(found.unwrap_or_else(|why| {
+                    tracing::warn!(%why, "could not look for a maps application");
+                    false
+                }))
             }),
         ];
         for path in flags.import {
@@ -1357,6 +1371,7 @@ impl AppModel {
                 }
                 self.phones = phones;
             }
+            Message::MapsFound(found) => self.can_map = found,
             Message::SmsRequested(number) => {
                 if self.phones.is_empty() {
                     return Task::none();

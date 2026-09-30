@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
   computer: it is kept with Circle's notes, not written into the card, so it
   does not sync. It survives linking and unlinking, and an undone delete
   brings it back.
+- **Show on the map.** An address in the detail pane has a button that opens
+  it in the maps application, as in GNOME Contacts. It appears when an
+  installed application opens `geo:` links — GNOME Maps, or the web-map
+  handlers KDE installs.
 
 ### Fixed
 

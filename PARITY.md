@@ -36,7 +36,7 @@ accessibility.
 | Selection mode (multi-select operations) | have | Select button, Ctrl+click, Shift+range, Ctrl+A; delete, export, add-to-group. |
 | Favorites pinned to top of list | have | As GNOME Contacts 51 does it (checked in its source): starred people first under a "Favorites" heading, then the rest. Star from the detail pane, a row's right-click menu, Edit menu or Ctrl+D (GNOME: the contact menu only, no key). Kept in `.crm/` on this device, never in the card; the launcher ranks favorites first. |
 | mailto:/tel: actions from the detail pane | have | Through the desktop handler; KDE Connect picks up `tel:` when installed. Direct D-Bus handoff open (03 §3). |
-| Address opens in a maps app | verify | GNOME's behaviour and Circle's both unchecked; Circle shows the address as text. |
+| Address opens in a maps app | have | GNOME Contacts 51 (checked in its source) offers "Show on the map" when a `maps:` handler exists and launches `maps:q=<address>`. Circle launches `geo:0,0?q=<address>` — the standard scheme, which GNOME Maps reads as a search and KDE's geo handlers turn into a web map search — when any installed application handles `geo:`, the address percent-encoded (`src/maps.rs`). |
 | Share contact as QR code | have | `ui/share.rs`: a trimmed card (no photo) fitted to one code, SVG rendered in the app. |
 
 ### Editing

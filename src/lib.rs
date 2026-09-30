@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod kdeconnect;
 pub mod key_bind;
 pub mod links;
+pub mod maps;
 pub mod relations;
 pub mod ui;
 

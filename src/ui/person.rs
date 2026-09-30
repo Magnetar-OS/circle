@@ -38,6 +38,9 @@ pub struct Field<'a> {
     /// addressed to. Set only for phones, so the renderer can offer texting
     /// without re-deriving what kind of field it is looking at.
     pub number: Option<String>,
+    /// The `geo:` search for this value, when it is an address — what "Show
+    /// on the map" opens. Set only for addresses, like `number` for phones.
+    pub map: Option<String>,
     /// The book this value came from. `None` for an unlinked contact, where
     /// there is only one source and saying so would be noise.
     pub source: Option<&'a str>,
@@ -116,6 +119,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     action: Some(format!("mailto:{}", email.value)),
                     icon: "mail-send-symbolic",
                     number: None,
+                    map: None,
                     source: attribute(book),
                 });
             }
@@ -138,6 +142,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     action: Some(format!("tel:{}", phone.value.replace(' ', ""))),
                     icon: "call-start-symbolic",
                     number: Some(phone.value.clone()),
+                    map: None,
                     source: attribute(book),
                 });
             }
@@ -152,6 +157,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                         .types
                         .first()
                         .map_or_else(|| crate::fl!("address"), |t| super::type_label(t)),
+                    map: Some(crate::maps::uri(&line)),
                     value: line,
                     action: None,
                     icon: "",
@@ -172,6 +178,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
                     action: Some(url.value.clone()),
                     icon: "web-browser-symbolic",
                     number: None,
+                    map: None,
                     source: attribute(book),
                 });
             }
@@ -198,6 +205,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
             action: None,
             icon: "",
             number: None,
+            map: None,
             source: attribute(book),
         });
     }
@@ -211,6 +219,7 @@ pub fn compose<'a>(cards: &'a [(&'a Contact, &'a str)]) -> Option<Composed<'a>> 
             action: None,
             icon: "",
             number: None,
+            map: None,
             source: attribute(book),
         });
     }
@@ -360,6 +369,40 @@ mod tests {
                 crate::fl!("label-mobile"),
                 "x-lab".to_owned()
             ]
+        );
+    }
+
+    /// An address is offered to the maps application as a search for the
+    /// line the pane shows; nothing else is.
+    #[test]
+    fn an_address_carries_its_map_search_and_nothing_else_does() {
+        let mut card = contact("personal", "a", "Ada Lovelace");
+        card.emails.push(typed("ada@example.org"));
+        card.addresses.push(cosmic_pim_core::model::Address {
+            street: "1 Main St".into(),
+            locality: "Athens".into(),
+            country: "GR".into(),
+            ..Default::default()
+        });
+
+        let cards = [(&card, "Personal")];
+        let composed = compose(&cards).unwrap();
+        let address = composed
+            .fields
+            .iter()
+            .find(|f| f.value == "1 Main St, Athens, GR")
+            .expect("the address row");
+        assert_eq!(
+            address.map.as_deref(),
+            Some(crate::maps::uri("1 Main St, Athens, GR").as_str())
+        );
+        assert!(
+            composed
+                .fields
+                .iter()
+                .filter(|f| f.value != address.value)
+                .all(|f| f.map.is_none()),
+            "a value that is not an address offered a map"
         );
     }
 

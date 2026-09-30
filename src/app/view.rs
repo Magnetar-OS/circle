@@ -85,6 +85,7 @@ impl AppModel {
                             person,
                             self.photos.get(&ContactKey::of(person.head)),
                             !self.phones.is_empty(),
+                            self.can_map,
                             self.is_favorite(&ContactKey::of(person.head)),
                         ));
                     // Relationships sit with the card's own data, above the

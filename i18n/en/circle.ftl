@@ -305,6 +305,7 @@ sms-sent = Message sent.
 sms-failed = The message could not be sent: { $why }
 sms = Text
 open-link = Open in a browser
+show-on-map = Show on the map
 back-to-list = Back to the list
 
 ## Keeping in touch

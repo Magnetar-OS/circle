@@ -36,7 +36,8 @@ Reading, searching, creating, editing, and deleting contacts all work.
 - **Browsing** — an address-book sidebar, the contact list, and a detail pane.
   Every value in the detail pane is selectable and has a copy button, because
   taking a number out of an address book is the main thing anybody does with
-  one.
+  one. An address opens in the maps application ("Show on the map", a
+  `geo:` search) when one is installed; without one there is no button.
 - **Search** across names, emails, organisations, nicknames, categories, and
   phone numbers, punctuation-insensitive — `5551234` matches `+1 (555) 123-4`.
 - **Editing** — names, emails, phones, addresses, organisation, job title,

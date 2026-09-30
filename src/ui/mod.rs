@@ -125,6 +125,7 @@ fn fallbacks(name: &str) -> &'static [&'static str] {
         "list-remove-symbolic" => &["list-remove", "edit-delete-symbolic", "gtk-remove"],
         "mail-message-new-symbolic" => &["mail-message-new", "mail-send-symbolic", "mail-send"],
         "mail-send-symbolic" => &["mail-send", "mail-message-new-symbolic", "mail-unread"],
+        "mark-location-symbolic" => &["mark-location", "find-location-symbolic", "find-location"],
         "non-starred-symbolic" => &["non-starred", "starred-symbolic"],
         "object-select-symbolic" => &["object-select", "gtk-apply", "emblem-ok-symbolic"],
         "starred-symbolic" => &["starred", "bookmark-new-symbolic"],

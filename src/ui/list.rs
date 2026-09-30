@@ -170,6 +170,9 @@ pub fn detail<'a>(
     // Whether a paired phone is in reach, which is what makes texting a
     // number possible at all.
     can_text: bool,
+    // Whether an installed application opens `geo:` URIs, which is what
+    // makes "Show on the map" do anything.
+    can_map: bool,
     favorite: bool,
 ) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
@@ -210,7 +213,7 @@ pub fn detail<'a>(
     if !person.fields.is_empty() {
         let mut section = widget::settings::section();
         for field in &person.fields {
-            section = section.add(value_row(field, can_text));
+            section = section.add(value_row(field, can_text, can_map));
         }
         column = column.push(section);
     }
@@ -291,7 +294,11 @@ fn favorite_button<'a>(key: ContactKey, favorite: bool) -> Element<'a, Message> 
 
 /// One labelled, selectable, copyable value, optionally with an action button
 /// and the book it came from.
-fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Element<'a, Message> {
+fn value_row<'a>(
+    field: &crate::ui::person::Field<'_>,
+    can_text: bool,
+    can_map: bool,
+) -> Element<'a, Message> {
     let spacing = cosmic::theme::spacing();
     let owned = field.value.clone();
 
@@ -338,6 +345,20 @@ fn value_row<'a>(field: &crate::ui::person::Field<'_>, can_text: bool) -> Elemen
                 widget::button::icon(crate::ui::icon("mail-message-new-symbolic"))
                     .on_press(Message::SmsRequested(number.clone())),
                 widget::text::body(fl!("sms")),
+                widget::tooltip::Position::Top,
+            )
+            .apply(Element::from),
+        );
+    }
+
+    // An address opens in the maps application when one is installed —
+    // GNOME Contacts' "Show on the map", through the same opener as a link.
+    if can_map && let Some(uri) = &field.map {
+        controls = controls.push(
+            widget::tooltip(
+                widget::button::icon(crate::ui::icon("mark-location-symbolic"))
+                    .on_press(Message::LaunchUrl(uri.clone())),
+                widget::text::body(fl!("show-on-map")),
                 widget::tooltip::Position::Top,
             )
             .apply(Element::from),
