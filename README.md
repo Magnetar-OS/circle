@@ -225,9 +225,9 @@ Two things that patcher does shape what the editor offers:
 - **Removing a grouped entry removes its group.** The patcher never removes a
   grouped line, so dropping one from the list would leave it on the card. The
   editor reports which grouped entries were removed and the save takes each
-  out of the card with its label lines (`X-ABLabel`, `X-ABADR`) —
-  [src/grouped.rs](src/grouped.rs) — for emails, phones, websites and
-  addresses alike. If the group also holds something else, only the entry's
+  out of the card with its label lines (`X-ABLabel`, `X-ABADR`) through the
+  substrate's `cosmic_pim_core::patch::remove_grouped`, for emails, phones,
+  websites and addresses alike. If the group also holds something else, only the entry's
   own line goes and the rest is left as it was. The one grouped entry with no
   remove button is one that shares its group with another entry of the same
   kind: the card cannot say which line was meant.

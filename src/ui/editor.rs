@@ -30,8 +30,9 @@
 //! text, and removing it is a separate act from editing it: the editor
 //! remembers which grouped entries the card had when it opened, and on save
 //! reports the ones that are gone ([`State::removed_groups`]) so the shell
-//! can take each out of the card *with* its label ([`crate::grouped`]). The
-//! rule is the same for emails, phones, websites and addresses.
+//! can take each out of the card *with* its label
+//! ([`cosmic_pim_core::patch::remove_grouped`]). The rule is the same for
+//! emails, phones, websites and addresses.
 //!
 //! One case has no remove button: two entries of one kind sharing a group.
 //! The card cannot say which of the two lines a removal meant, so neither is
@@ -41,6 +42,7 @@ use cosmic::Element;
 use cosmic::iced::Length;
 use cosmic::widget;
 use cosmic_pim_core::model::{Address, CalendarMeta, Contact, Typed};
+use cosmic_pim_core::patch::GroupedEntry;
 
 use crate::fl;
 
@@ -170,7 +172,7 @@ pub struct State {
     /// missing from these on save was removed here — and only that: a grouped
     /// line another writer adds to the card meanwhile was never in this list,
     /// so it is not mistaken for one the user took out.
-    opened_groups: Vec<crate::grouped::Entry>,
+    opened_groups: Vec<GroupedEntry>,
 }
 
 impl State {
@@ -184,7 +186,7 @@ impl State {
         let categories_text = join_categories(&contact.categories);
         let (ids, names) = writable(books);
         Self {
-            opened_groups: crate::grouped::entries(&contact),
+            opened_groups: contact.grouped_entries(),
             contact,
             is_new: false,
             birthday_text,
@@ -237,8 +239,8 @@ impl State {
     /// Saving does not remove these — the patcher never removes a grouped
     /// line — so the shell takes them out of the saved card afterwards.
     #[must_use]
-    pub fn removed_groups(&self) -> Vec<crate::grouped::Entry> {
-        let kept = crate::grouped::entries(&self.finish());
+    pub fn removed_groups(&self) -> Vec<GroupedEntry> {
+        let kept = self.finish().grouped_entries();
         self.opened_groups
             .iter()
             .filter(|entry| !kept.contains(entry))
@@ -1089,9 +1091,9 @@ item4.URL:https://ada.example\r\nitem4.X-ABLabel:Site\r\nEND:VCARD\r\n";
         State::edit(contact, &[])
     }
 
-    fn entry(property: &'static str, group: &str) -> crate::grouped::Entry {
-        crate::grouped::Entry {
-            property,
+    fn entry(property: &str, group: &str) -> GroupedEntry {
+        GroupedEntry {
+            property: property.to_owned(),
             group: group.to_owned(),
         }
     }

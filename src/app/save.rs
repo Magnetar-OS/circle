@@ -5,6 +5,7 @@
 
 use cosmic::app::Task;
 use cosmic_pim_core::model::Contact;
+use cosmic_pim_core::patch::{GroupedEntry, remove_grouped};
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
@@ -170,11 +171,12 @@ impl AppModel {
 }
 
 /// Takes the grouped entries the editor removed out of the just-saved card,
-/// each with the label lines that belong to it — see [`crate::grouped`].
+/// each with the label lines that belong to it — see
+/// [`cosmic_pim_core::patch::remove_grouped`].
 fn remove_grouped_entries(
     store: &ContactStore,
     contact: &Contact,
-    removed: &[crate::grouped::Entry],
+    removed: &[GroupedEntry],
 ) -> Result<(), String> {
     use cosmic_pim_core::store::contacts::write_contact_raw;
 
@@ -184,7 +186,7 @@ fn remove_grouped_entries(
     let saved = store
         .contact(&contact.addressbook_id, &contact.uid)
         .ok_or_else(|| fl!("error-load-contacts"))?;
-    let stripped = crate::grouped::remove(&saved.raw, &contact.uid, removed)
+    let stripped = remove_grouped(&saved.raw, &contact.uid, removed)
         .ok_or_else(|| fl!("error-load-contacts"))?;
     let meta = store
         .book(&contact.addressbook_id)
@@ -450,6 +452,190 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nEND:VCARD\r\n";
         // No such book or card: reaching for either would be an error.
         let contact = Contact::draft("nowhere");
         assert_eq!(remove_grouped_entries(&store, &contact, &[]), Ok(()));
+    }
+
+    fn entry(property: &str, group: &str) -> GroupedEntry {
+        GroupedEntry {
+            property: property.to_owned(),
+            group: group.to_owned(),
+        }
+    }
+
+    /// `raw` as a book's only file, after the save's grouped-entry step has
+    /// taken `removed` out of the card carrying `uid`: what is on disk.
+    fn removing(raw: &str, uid: &str, removed: &[GroupedEntry]) -> Result<String, String> {
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Home", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        write_contact_raw(&book, "cards.vcf", raw).unwrap();
+        store.refresh();
+        let contact = store.contact(&book.id, uid).unwrap_or_else(|| {
+            let mut stranger = Contact::draft(&book.id);
+            stranger.uid = uid.to_owned();
+            stranger
+        });
+        remove_grouped_entries(&store, &contact, removed)?;
+        Ok(std::fs::read_to_string(book.path.join("cards.vcf")).unwrap())
+    }
+
+    const APPLE: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\n\
+EMAIL;type=WORK:ada@work.example\r\n\
+item1.EMAIL;type=INTERNET:ada@home.example\r\nitem1.X-ABLabel:Summer house\r\n\
+item2.TEL;type=pref:+30 210 1234567\r\nitem2.X-ABLabel:Boat\r\n\
+item3.ADR;type=HOME:;;1 Main St;Athens;;10431;GR\r\nitem3.X-ABLabel:Winter\r\n\
+item3.X-ABADR:gr\r\n\
+item4.URL:https://ada.example\r\nitem4.X-ABLabel:_$!<HomePage>!$_\r\n\
+PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nEND:VCARD\r\n";
+
+    /// Each of the four kinds goes with its label, and nothing else on the
+    /// card moves.
+    #[test]
+    fn a_grouped_entry_goes_with_its_label_whatever_kind_it_is() {
+        for (property, group, gone) in [
+            (
+                "EMAIL",
+                "item1",
+                "item1.EMAIL;type=INTERNET:ada@home.example\r\nitem1.X-ABLabel:Summer house\r\n",
+            ),
+            (
+                "TEL",
+                "item2",
+                "item2.TEL;type=pref:+30 210 1234567\r\nitem2.X-ABLabel:Boat\r\n",
+            ),
+            (
+                "ADR",
+                "item3",
+                "item3.ADR;type=HOME:;;1 Main St;Athens;;10431;GR\r\nitem3.X-ABLabel:Winter\r\n\
+item3.X-ABADR:gr\r\n",
+            ),
+            (
+                "URL",
+                "item4",
+                "item4.URL:https://ada.example\r\nitem4.X-ABLabel:_$!<HomePage>!$_\r\n",
+            ),
+        ] {
+            let out = removing(APPLE, "ada", &[entry(property, group)]).unwrap();
+            assert_eq!(
+                out,
+                APPLE.replace(gone, ""),
+                "removing {group}.{property} changed something else, or left its label behind"
+            );
+            assert!(
+                !out.contains(&format!("{group}.")),
+                "{group} still has a line on the card:\n{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn several_grouped_entries_go_in_one_pass() {
+        let out = removing(
+            APPLE,
+            "ada",
+            &[entry("EMAIL", "item1"), entry("ADR", "item3")],
+        )
+        .unwrap();
+        assert!(!out.contains("item1."), "{out}");
+        assert!(!out.contains("item3."), "{out}");
+        assert!(out.contains("item2.TEL"), "{out}");
+        assert!(out.contains("item4.URL"), "{out}");
+    }
+
+    /// One label over two values: taking one value out leaves the label with
+    /// the other, which it still labels.
+    #[test]
+    fn a_group_shared_with_another_value_keeps_its_label() {
+        let card = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\n\
+item1.EMAIL:ada@boat.example\r\nitem1.TEL:+30 210 1234567\r\nitem1.X-ABLabel:Boat\r\n\
+END:VCARD\r\n";
+        let out = removing(card, "ada", &[entry("EMAIL", "item1")]).unwrap();
+        assert_eq!(out, card.replace("item1.EMAIL:ada@boat.example\r\n", ""));
+
+        // Both values removed: now the label labels nothing, and goes.
+        let out = removing(
+            card,
+            "ada",
+            &[entry("EMAIL", "item1"), entry("TEL", "item1")],
+        )
+        .unwrap();
+        assert!(!out.contains("item1."), "{out}");
+    }
+
+    /// A property this application does not know is not deleted on a guess.
+    #[test]
+    fn an_unknown_line_in_the_group_is_left_alone() {
+        let card = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\n\
+item1.ADR:;;1 Main St;Athens;;;GR\r\nitem1.X-ABLabel:Home\r\nitem1.X-VENDOR-PIN:42\r\n\
+END:VCARD\r\n";
+        let out = removing(card, "ada", &[entry("ADR", "item1")]).unwrap();
+        assert_eq!(
+            out,
+            card.replace("item1.ADR:;;1 Main St;Athens;;;GR\r\n", "")
+        );
+    }
+
+    /// Every export is one file of many cards, and every one of them starts
+    /// its groups at `item1`.
+    #[test]
+    fn the_same_group_name_in_another_card_is_that_cards_own() {
+        let two = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\n\
+item1.EMAIL:ada@home.example\r\nitem1.X-ABLabel:Home\r\nEND:VCARD\r\n\
+BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\n\
+item1.EMAIL:bob@home.example\r\nitem1.X-ABLabel:Home\r\nEND:VCARD\r\n";
+
+        let out = removing(two, "bob", &[entry("EMAIL", "item1")]).unwrap();
+        assert!(out.contains("item1.EMAIL:ada@home.example\r\nitem1.X-ABLabel:Home\r\n"));
+        assert!(!out.contains("bob@home.example"), "{out}");
+        assert_eq!(out.matches("X-ABLabel").count(), 1, "{out}");
+
+        assert!(
+            removing(two, "nobody", &[entry("EMAIL", "item1")]).is_err(),
+            "a card that is not in the file was treated as one that is"
+        );
+    }
+
+    /// `item1` is not `item10`, and a label folded over two lines is one
+    /// line to remove.
+    #[test]
+    fn group_names_match_whole_and_folded_lines_go_whole() {
+        let card = "BEGIN:VCARD\nVERSION:3.0\nUID:ada\nFN:Ada\n\
+item1.EMAIL:ada@home.example\nitem1.X-ABLabel:A label long enough that the \n server folded it\n\
+item10.EMAIL:ada@other.example\nitem10.X-ABLabel:Other\nEND:VCARD\n";
+        let out = removing(card, "ada", &[entry("EMAIL", "item1")]).unwrap();
+        assert_eq!(
+            out,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:ada\nFN:Ada\n\
+item10.EMAIL:ada@other.example\nitem10.X-ABLabel:Other\nEND:VCARD\n"
+        );
+    }
+
+    #[test]
+    fn a_card_with_nothing_to_remove_is_left_as_it_was() {
+        assert_eq!(removing(APPLE, "ada", &[]).unwrap(), APPLE);
+        assert_eq!(
+            removing(APPLE, "ada", &[entry("EMAIL", "item9")]).unwrap(),
+            APPLE
+        );
+    }
+
+    /// What the editor compares on save: the grouped entries, read off all
+    /// four lists in the order the substrate names them.
+    #[test]
+    fn the_grouped_entries_of_a_contact_are_read_off_all_four_lists() {
+        let contact = cosmic_pim_core::vcard::parse_vcards(APPLE, "personal", "ada.vcf").remove(0);
+        assert_eq!(
+            contact.grouped_entries(),
+            [
+                entry("EMAIL", "item1"),
+                entry("TEL", "item2"),
+                entry("URL", "item4"),
+                entry("ADR", "item3"),
+            ]
+        );
     }
 
     /// A save that lost a race with another writer says so, and names the
