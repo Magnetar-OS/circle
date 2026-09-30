@@ -13,8 +13,10 @@ source where a row was uncertain. Status values: **have** / **partial** /
 **verify** where honesty requires checking rather than guessing.
 
 Audited 2026-08-27; re-audited 2026-09-29 against the code at that date
-and against GNOME Contacts 51.0. Every **have** below was checked in the
-source, not in the docs.
+and against GNOME Contacts 51.0; updated 2026-09-30 when favorites, maps and
+grouped-entry removal were built (each checked against GNOME Contacts 51.0's
+source) and tasks per contact were rejected. Every **have** below was
+checked in the source, not in the docs.
 
 **What 51.0 changed.** Read from the 50.0…51.0 comparison on
 gitlab.gnome.org (the release has no NEWS body): contact photos persist in
@@ -141,7 +143,7 @@ synced books others see stay unpolluted.
 | Journal (free-standing, not per-contact) | rejected | Out of scope for an address book (audit 2026-09-28 R-4). |
 | Gifts tracking | rejected | Same. |
 | Debts tracking | rejected | Same. |
-| Tasks per contact | gap | Undecided: the suite's task owner is Slate, and a link from person to task may be the right shape. Put to the user in the 2026-09-29 fix-run notes. |
+| Tasks per contact | rejected | Tasks live in Slate, the suite's task owner; the user chose this over linking people to Slate tasks or Circle-local tasks (2026-09-30). |
 | Calls / conversations log | partial | The interaction log records that you were in touch and when; it has no call/conversation type or content. |
 | Life events | rejected | Out of scope for an address book (audit 2026-09-28 R-4). |
 | API / programmatic access | have | Differently: files-as-truth. Every contact is a plain `.vcf` on disk, every CRM record a plain file — scriptable without an API server. Monica v3's MCP server has no equivalent; record as a rejection if that stands. |
