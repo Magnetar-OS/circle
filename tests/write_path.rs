@@ -159,6 +159,52 @@ fn editing_a_grouped_value_rewrites_it_in_place_and_keeps_its_label() {
     );
 }
 
+/// Two lines of one property under one label (audit S-04). Editing one of
+/// them in the editor and saving rewrites that line only: the patcher used to
+/// set every line of the group to the last value on any save, so the other
+/// address was lost and the loss went to the server with the next push.
+#[test]
+fn editing_one_of_two_values_sharing_a_group_keeps_the_other() {
+    const SHARED: &str = "BEGIN:VCARD\r\n\
+VERSION:3.0\r\n\
+UID:ada@server\r\n\
+FN:Ada Lovelace\r\n\
+item1.EMAIL;type=INTERNET:ada@one.example\r\n\
+item1.EMAIL;type=INTERNET:ada@two.example\r\n\
+item1.X-ABLabel:Both\r\n\
+END:VCARD\r\n";
+
+    let mut fixture = fixture();
+    write_contact_raw(&fixture.book, "ada.vcf", SHARED).expect("seed the shared group");
+    fixture.store.refresh();
+
+    let mut editor = fixture.editor();
+    let first = editor
+        .contact
+        .emails
+        .iter()
+        .position(|e| e.value == "ada@one.example")
+        .expect("the first address of the group");
+    editor.update(Message::ListValue(
+        ListKind::Email,
+        first,
+        "ada@first.example".into(),
+    ));
+    fixture.store.save(&editor.finish()).expect("save");
+
+    // Every line as it was bar the one edited; the save adds its REV.
+    let card: String = fixture
+        .on_disk()
+        .split_inclusive("\r\n")
+        .filter(|line| !line.starts_with("REV:"))
+        .collect();
+    assert_eq!(
+        card,
+        SHARED.replace("ada@one.example", "ada@first.example"),
+        "the edit reached the other line of the group, or something else moved"
+    );
+}
+
 #[test]
 fn adding_and_removing_ungrouped_values_lands_on_disk() {
     let mut fixture = fixture();
