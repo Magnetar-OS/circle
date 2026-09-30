@@ -172,10 +172,10 @@ launcher plugin). What remains:
 
 ## Track D — Architecture and code quality
 
-- **Split `app.rs`** (about 3 900 lines on 2026-09-29, well past the
-  ~2 000 convention tolerates with `view.rs` split out). Extract
-  `view` composition into `src/ui/`; keep `update` a single match, per
-  convention.
+- **Split `app.rs`** — done 2026-09-30. `app.rs` keeps the types, the
+  `Application` impl and `update` as one match; the handlers it calls
+  live beside it by domain in `src/app/` (`view`, `list`, `save`,
+  `delete`, `transfer`, `sync`), moved verbatim with their tests.
 - **Tests grow with each Track A item**: linking gets its own round-trip
   suite in the style of `write_path.rs` (real files, no mocks); sync UI
   tested against a local CardDAV fixture (Radicale in CI); duplicate

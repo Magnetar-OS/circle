@@ -16,7 +16,7 @@ Re-run this audit when the conventions document changes or before a release.
 
 | # | Item | State | How it was checked |
 |---|---|---|---|
-| 1 | Generated from a template, skeleton kept | follows | `src/` is the template shape: `main.rs` → `lib.rs::run`, `app.rs` with the `Application` impl, `config.rs`, `i18n.rs`. `update` is one match, the view split into `src/ui/`. |
+| 1 | Generated from a template, skeleton kept | follows | `src/` is the template shape: `main.rs` → `lib.rs::run`, `app.rs` with the `Application` impl, `config.rs`, `i18n.rs`. `update` is one match; the widgets are in `src/ui/`, and the handlers the match calls are in `src/app/` by domain. |
 | 2 | libcosmic unpinned, `Cargo.lock` committed, no separate `cosmic-config`, one comment per feature | follows | No `rev =` in `Cargo.toml`; `Cargo.lock` is tracked; `cosmic-config` is used through `cosmic::cosmic_config`; the `[dependencies.libcosmic]` block comments each of the six features. |
 | 3 | `rust-toolchain.toml` and `rust-version` agree; CI takes the toolchain from the file | **fixed** | Both name 1.98. CI was overriding the file — see finding 1. |
 | 4 | One RDNN id for config store, desktop entry, metainfo, icon, `StartupWMClass`, D-Bus name | follows | `com.magnetaros.Circle` in `app.rs`, `launcher.rs`, `justfile`, `resources/app.desktop` (`Icon=` and `StartupWMClass=`), and `resources/app.metainfo.xml` (`<id>` and `<launchable>`). |
