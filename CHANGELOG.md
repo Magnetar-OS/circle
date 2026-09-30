@@ -34,6 +34,11 @@ All notable changes to this project are documented here. The format follows
 - Deleting or importing one contact in a `.vcf` holding several cards written
   in lowercase (`begin:vcard`) no longer removes or replaces everyone else in
   the file.
+- An edit, delete, undo or import made while a sync pass was bringing down
+  the same contact could be overwritten by the server's copy, without a word.
+  Each change and its upload are now one step, which a sync pass waits for.
+  A contact updated by importing a `.vcf` into a synced address book is also
+  merged automatically when the server changed it meanwhile, like an edit.
 
 ## [1.2.0] - 2026-09-29
 

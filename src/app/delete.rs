@@ -6,7 +6,7 @@ use cosmic::app::Task;
 use cosmic::widget;
 use cosmic_pim_core::store::contacts::ContactStore;
 
-use super::sync::{queue_card_removal, queue_push};
+use super::sync::write_and_queue;
 use super::{AppModel, ContactKey, DeletedCard, Message, UNDO_DEPTH};
 use crate::fl;
 
@@ -18,6 +18,7 @@ impl AppModel {
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
+        let root = store.root().to_path_buf();
 
         let mut removed = Vec::new();
         let mut label = String::new();
@@ -27,21 +28,31 @@ impl AppModel {
             let Some(contact) = store.contact(&key.book, &key.uid) else {
                 continue;
             };
-            if let Err(why) = store.delete(&key.book, &key.uid) {
-                first_error.get_or_insert_with(|| {
-                    fl!(
-                        "error-delete",
-                        name = contact.label(),
-                        why = why.to_string()
-                    )
-                });
-                continue;
-            }
-            // Reported beside the undo toast, not instead of it: the card is
-            // already gone locally and must stay undoable.
-            if let Err(why) = queue_card_removal(store, &key.book, &contact.file_name, &contact.raw)
-            {
-                side_error.get_or_insert(why);
+            // The resource on the server is the file: when the card was the
+            // whole file the resource goes, and when the file still holds
+            // other cards (an export placed in a synced book) the rewritten
+            // file is uploaded instead — a DELETE would take everybody else
+            // in it off the server too.
+            match write_and_queue(&root, &key.book, &[&contact.file_name], || {
+                store.delete(&key.book, &key.uid)
+            }) {
+                Ok(((), queued)) => {
+                    // Reported beside the undo toast, not instead of it: the
+                    // card is already gone locally and must stay undoable.
+                    if let Err(why) = queued {
+                        side_error.get_or_insert(why);
+                    }
+                }
+                Err(why) => {
+                    first_error.get_or_insert_with(|| {
+                        fl!(
+                            "error-delete",
+                            name = contact.label(),
+                            why = why.to_string()
+                        )
+                    });
+                    continue;
+                }
             }
             self.photos.remove(key);
             label = contact.label();
@@ -129,6 +140,7 @@ impl AppModel {
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
+        let root = store.root().to_path_buf();
 
         let mut first_error = None;
         for card in cards {
@@ -136,19 +148,22 @@ impl AppModel {
                 first_error.get_or_insert_with(|| fl!("error-load-contacts"));
                 continue;
             };
-            // Merged into the file's current contents rather than written
-            // over them, for the same reason the segment was stored: the
-            // people who shared this file with the deleted card are still in
-            // it, and may have been edited since.
-            let current = std::fs::read_to_string(meta.path.join(&card.file_name)).ok();
-            let restored = restore_into(current.as_deref(), &card.raw, &card.uid);
-            match cosmic_pim_core::store::contacts::write_contact_raw(
-                &meta,
-                &card.file_name,
-                &restored,
-            ) {
-                Ok(()) => {
-                    if let Err(why) = queue_push(store, &card.book, &card.file_name) {
+            let restoring = write_and_queue(&root, &card.book, &[&card.file_name], || {
+                // Merged into the file's current contents rather than written
+                // over them, for the same reason the segment was stored: the
+                // people who shared this file with the deleted card are still
+                // in it, and may have been edited since.
+                let current = std::fs::read_to_string(meta.path.join(&card.file_name)).ok();
+                let restored = restore_into(current.as_deref(), &card.raw, &card.uid);
+                cosmic_pim_core::store::contacts::write_contact_raw(
+                    &meta,
+                    &card.file_name,
+                    &restored,
+                )
+            });
+            match restoring {
+                Ok(((), queued)) => {
+                    if let Err(why) = queued {
                         first_error.get_or_insert(why);
                     }
                     if let Some(record) = card.crm {

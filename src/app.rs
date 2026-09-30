@@ -30,7 +30,7 @@ mod view;
 pub use sync::SyncSummary;
 
 use delete::card_segment;
-use sync::{queue_card_removal, queue_push};
+use sync::{queue_created, write_and_queue};
 use transfer::file_label;
 
 const APP_ID: &str = "com.magnetaros.Circle";
@@ -1743,13 +1743,23 @@ impl AppModel {
                     // The server-side coordinates live in the sidecar, which
                     // survives the local delete — but the file name has to be
                     // taken while the card still exists.
-                    let card = store.contact(&key.book, &key.uid);
-                    if let Err(why) = store.delete(&key.book, &key.uid) {
-                        return self.toast(fl!("error-delete", name = name, why = why.to_string()));
-                    }
-                    let queued = card.map_or(Ok(()), |card| {
-                        queue_card_removal(store, &key.book, &card.file_name, &card.raw)
-                    });
+                    let root = store.root().to_path_buf();
+                    let file_name = store
+                        .contact(&key.book, &key.uid)
+                        .map(|card| card.file_name);
+                    let file_names: Vec<&str> = file_name.iter().map(String::as_str).collect();
+                    let queued = match write_and_queue(&root, &key.book, &file_names, || {
+                        store.delete(&key.book, &key.uid)
+                    }) {
+                        Ok(((), queued)) => queued,
+                        Err(why) => {
+                            return self.toast(fl!(
+                                "error-delete",
+                                name = name,
+                                why = why.to_string()
+                            ));
+                        }
+                    };
                     self.selected = None;
                     self.editor = None;
                     self.rebuild_nav();
@@ -1787,7 +1797,7 @@ impl AppModel {
                     return self.toast(fl!("error-no-writable-book"));
                 };
                 let queued = match store.create_group(name.trim(), &book, version) {
-                    Ok(group) => queue_push(store, &book, &group.file_name),
+                    Ok(group) => queue_created(store, &book, &group.file_name),
                     Err(why) => return self.toast(why.to_string()),
                 };
                 self.rebuild_nav();

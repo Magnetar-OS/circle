@@ -608,20 +608,21 @@ fn a_queued_edit_carries_its_pre_edit_base_and_the_first_base_sticks() {
         vstore.set_remote("/dav/contacts/", false).expect("bind");
     }
 
-    // First edit: what the editor does — read, patch, save, queue with the
-    // text it read.
+    // First edit: what the editor does — the save and its enqueue as one
+    // step, which reads the pre-edit text off the disk as the base.
     let before_first = fixture.ada().raw;
     let mut editor = fixture.editor();
     editor.update(Message::Text(Field::Family, "Byron".into()));
     let saved = editor.finish();
-    fixture.store.save(&saved).unwrap();
-    cosmic_pim_sync::queue_save_with_base(
-        fixture.store.root(),
-        &fixture.book.id,
-        &saved.file_name,
-        Some(&before_first),
-    )
-    .expect("queue");
+    let root = fixture.store.root().to_path_buf();
+    let queued =
+        cosmic_pim_sync::save_and_queue(&root, &fixture.book.id, &[&saved.file_name], || {
+            fixture.store.save(&saved)
+        })
+        .expect("save")
+        .queued
+        .expect("queue");
+    assert!(queued, "a bound book queued nothing");
 
     // Second edit before any push drains.
     let before_second = fixture.ada().raw;
@@ -629,13 +630,11 @@ fn a_queued_edit_carries_its_pre_edit_base_and_the_first_base_sticks() {
     let mut editor = fixture.editor();
     editor.update(Message::Text(Field::Given, "Augusta".into()));
     let saved = editor.finish();
-    fixture.store.save(&saved).unwrap();
-    cosmic_pim_sync::queue_save_with_base(
-        fixture.store.root(),
-        &fixture.book.id,
-        &saved.file_name,
-        Some(&before_second),
-    )
+    cosmic_pim_sync::save_and_queue(&root, &fixture.book.id, &[&saved.file_name], || {
+        fixture.store.save(&saved)
+    })
+    .expect("save")
+    .queued
     .expect("queue");
 
     let pending = VdirStore::open(fixture.book.clone())

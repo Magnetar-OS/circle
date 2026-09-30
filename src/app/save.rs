@@ -9,7 +9,7 @@ use cosmic_pim_core::patch::{GroupedEntry, remove_grouped};
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
-use super::sync::queue_push_with_base;
+use super::sync::write_and_queue;
 use super::{AppModel, ContactKey, Message};
 use crate::fl;
 use crate::ui::dialogs::Dialog;
@@ -31,6 +31,7 @@ impl AppModel {
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
+        let root = store.root().to_path_buf();
 
         let mut joined = 0usize;
         let mut first_error: Option<String> = None;
@@ -41,18 +42,12 @@ impl AppModel {
             if contact.categories.iter().any(|c| c == &name) {
                 continue;
             }
-            let base = contact.raw.clone();
             contact.categories.push(name.clone());
-            match store.save_as(&contact, version) {
-                Ok(()) => {
-                    // The card was read two lines up; its raw is the pre-edit
-                    // text sync can merge against.
-                    if let Err(why) = queue_push_with_base(
-                        store,
-                        &key.book,
-                        &contact.file_name,
-                        (!base.trim().is_empty()).then_some(base.as_str()),
-                    ) {
+            match write_and_queue(&root, &key.book, &[&contact.file_name], || {
+                store.save_as(&contact, version)
+            }) {
+                Ok(((), queued)) => {
+                    if let Err(why) = queued {
                         first_error.get_or_insert(why);
                     }
                     joined += 1;
@@ -95,50 +90,57 @@ impl AppModel {
         let Some(store) = self.store.as_mut() else {
             return Task::none();
         };
+        let root = store.root().to_path_buf();
 
-        // The version applies to NEW cards only; an existing card keeps the
-        // version its bytes declare, because saving patches rather than
-        // converts.
-        if let Err(why) = store.save_as(&contact, version) {
-            // Deliberately keeps the editor open: the save failed, so the
-            // user's text is the only copy that exists. When the card changed
-            // on disk underneath the editor, the list is re-read so it shows
-            // the other version, and the message says where this one went.
-            if matches!(why, StoreError::Conflict { .. }) {
-                store.refresh();
-                self.photos.remove(&ContactKey::of(&contact));
-                self.reload();
+        // Everything this save does to the card's file is one write, queued
+        // for upload once, under the book's sync lock — so a pass cannot
+        // pull the card between the save and its enqueue, and one queue
+        // entry covers the save, the grouped removals and the photo.
+        let saved = write_and_queue(
+            &root,
+            &contact.addressbook_id,
+            &[&contact.file_name],
+            || {
+                // The version applies to NEW cards only; an existing card
+                // keeps the version its bytes declare, because saving patches
+                // rather than converts.
+                store.save_as(&contact, version)?;
+                // A grouped entry removed in the editor is still on the saved
+                // card: the patcher edits grouped lines in place and never
+                // removes one. It goes here, with its label.
+                let removal = remove_grouped_entries(store, &contact, &removed_groups);
+                // The photo change runs against the *saved* bytes, which is
+                // what makes it uniform for new and existing cards: after the
+                // save, both have a card on disk to patch. The photo is not
+                // part of the model on purpose — see `Contact::has_photo` —
+                // so it cannot travel through `save_as`.
+                let photo = apply_photo_edit(store, &contact, &photo_edit);
+                Ok((removal, photo))
+            },
+        );
+        let ((removal, photo), queued) = match saved {
+            Ok(saved) => saved,
+            Err(why) => {
+                // Deliberately keeps the editor open: the save failed, so the
+                // user's text is the only copy that exists. When the card
+                // changed on disk underneath the editor, the list is re-read
+                // so it shows the other version, and the message says where
+                // this one went.
+                if matches!(
+                    why,
+                    cosmic_pim_sync::Error::Store(StoreError::Conflict { .. })
+                ) {
+                    store.refresh();
+                    self.photos.remove(&ContactKey::of(&contact));
+                    self.reload();
+                }
+                return self.toast(save_error(&contact.label(), &why));
             }
-            return self.toast(save_error(&contact.label(), &why));
-        }
-
-        // The save landed — queue it for upload before anything later in this
-        // function can fail. The photo patch below rewrites the same file, so
-        // one queue entry covers both. The base is the text the editor was
-        // opened on — exactly what this edit was made against — which is what
-        // lets sync auto-merge if the server changed the card meanwhile; a
-        // brand-new contact has no before and queues without one.
-        let queued = match store.contact(&contact.addressbook_id, &contact.uid) {
-            Some(saved) => {
-                let base = (!contact.raw.trim().is_empty()).then_some(contact.raw.as_str());
-                queue_push_with_base(store, &contact.addressbook_id, &saved.file_name, base)
-            }
-            None => Ok(()),
         };
-
-        // A grouped entry removed in the editor is still on the saved card:
-        // the patcher edits grouped lines in place and never removes one. It
-        // goes here, with its label. Reported with the queue's outcome — the
-        // save itself landed either way.
-        let removal = remove_grouped_entries(store, &contact, &removed_groups);
+        // Reported together — the save itself landed either way.
         let queued = queued.and(removal);
 
-        // The photo change runs against the *saved* bytes, which is what makes
-        // it uniform for new and existing cards: after the save above, both
-        // have a card on disk to patch. The photo is not part of the model on
-        // purpose — see `Contact::has_photo` — so it cannot travel through
-        // `save_as`.
-        if let Err(why) = apply_photo_edit(store, &contact, &photo_edit) {
+        if let Err(why) = photo {
             self.photos.remove(&ContactKey::of(&contact));
             self.editor = None;
             self.selected = Some(ContactKey::of(&contact));
@@ -192,7 +194,7 @@ fn remove_grouped_entries(
         .book(&contact.addressbook_id)
         .ok_or_else(|| fl!("error-load-contacts"))?;
     write_contact_raw(meta, &saved.file_name, &stripped)
-        .map_err(|why| save_error(&contact.label(), &why))
+        .map_err(|why| save_error(&contact.label(), &why.into()))
 }
 
 /// Applies the editor's photo intent to the just-saved card, through the
@@ -252,6 +254,7 @@ fn apply_group_changes(
 ) -> Option<String> {
     use cosmic_pim_core::vcard::{member_uid, member_uri};
 
+    let root = store.root().to_path_buf();
     let mut first_error = None;
     for row in changed {
         let Some(group) = store.contact(&contact.addressbook_id, &row.uid) else {
@@ -270,17 +273,12 @@ fn apply_group_changes(
             members.retain(|uri| member_uid(uri) != Some(contact.uid.as_str()));
         }
 
-        match store.set_group_members(&contact.addressbook_id, &row.uid, &members) {
-            // Queued here rather than by the caller because this is where the
-            // group's pre-edit bytes are in hand — the base sync merges
-            // against if the server changed the group card meanwhile.
-            Ok(()) => {
-                if let Err(why) = queue_push_with_base(
-                    store,
-                    &contact.addressbook_id,
-                    &group.file_name,
-                    Some(&group.raw),
-                ) {
+        // Each group card is its own file, so its own write and upload.
+        match write_and_queue(&root, &contact.addressbook_id, &[&group.file_name], || {
+            store.set_group_members(&contact.addressbook_id, &row.uid, &members)
+        }) {
+            Ok(((), queued)) => {
+                if let Err(why) = queued {
                     first_error.get_or_insert(why);
                 }
             }
@@ -351,9 +349,9 @@ fn process_photo(data: Vec<u8>, fallback_mime: &'static str) -> (Vec<u8>, &'stat
 /// and the write (a sync pass, another app), nothing was overwritten, and
 /// this version was kept beside it — which the generic message would bury in
 /// the substrate's English.
-pub(super) fn save_error(name: &str, why: &StoreError) -> String {
+pub(super) fn save_error(name: &str, why: &cosmic_pim_sync::Error) -> String {
     match why {
-        StoreError::Conflict { conflict, .. } => fl!(
+        cosmic_pim_sync::Error::Store(StoreError::Conflict { conflict, .. }) => fl!(
             "error-save-conflict",
             name = name,
             file = conflict.file_name().map_or_else(
@@ -646,7 +644,7 @@ item10.EMAIL:ada@other.example\nitem10.X-ABLabel:Other\nEND:VCARD\n"
             target: "/c/personal/ada.vcf".into(),
             conflict: "/c/personal/ada.vcf.1790000000.conflict".into(),
         };
-        let message = save_error("Ada", &why);
+        let message = save_error("Ada", &why.into());
         assert_eq!(
             message,
             fl!(
@@ -657,10 +655,8 @@ item10.EMAIL:ada@other.example\nitem10.X-ABLabel:Other\nEND:VCARD\n"
         );
 
         let read_only = StoreError::ReadOnly("Work".to_owned());
-        assert_eq!(
-            save_error("Ada", &read_only),
-            fl!("error-save", name = "Ada", why = read_only.to_string())
-        );
+        let expected = fl!("error-save", name = "Ada", why = read_only.to_string());
+        assert_eq!(save_error("Ada", &read_only.into()), expected);
     }
 
     /// A PNG of the given size, for the photo-processing tests.

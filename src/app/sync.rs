@@ -3,8 +3,11 @@
 //! Accounts and sync: running a pass, saying what it left behind, and
 //! queueing local writes for upload.
 
+use std::path::Path;
+
 use cosmic::app::Task;
 use cosmic::widget;
+use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
 use super::{AppModel, ContextPage, Message};
@@ -175,77 +178,58 @@ fn reload_account_store(accounts: &mut cosmic_pim_accounts::AccountStore) -> Res
         .map_err(|why| format!("{}: {why}", fl!("accounts")))
 }
 
-/// Queues a written card for upload to whatever server its book is bound to.
+/// Writes to a book and queues what the write left for upload, as one step.
 ///
 /// Storage deliberately knows nothing about CardDAV (see
-/// `cosmic_pim_sync::writeback`), so every write site in the shell pairs its
-/// save with this call. A local-only book queues nothing. A failure to queue
-/// does not undo the local save — the card's text is not at risk — but it is
-/// returned, as a sentence for a toast, because the edit will not reach the
-/// server until the card is written again, and nobody would otherwise know.
+/// `cosmic_pim_sync::writeback`), so every write site in the shell goes
+/// through here. `write` is the change — a save, a delete, a restore — and
+/// `file_names` the files of `book_id` it may touch. Through
+/// [`cosmic_pim_sync::save_and_queue`] the write and its enqueue happen under
+/// the book's sync lock: a sync pass pulling the same card can no longer land
+/// between the two and write the server's copy over the edit. The bytes each
+/// file held before the write are the base the sync engine merges against
+/// when the server changed the same card; a file the write removed is queued
+/// as a deletion, and one that still holds other cards as an upload.
 ///
-/// Sites that read the card before overwriting it call
-/// [`queue_push_with_base`] instead: the pre-edit bytes are what let the sync
-/// engine three-way-merge automatically when the server turns out to have
-/// changed the same card. This form is for writes with no meaningful "before"
-/// — a brand-new file, an undo restoring a deleted one, a bulk import.
-pub(super) fn queue_push(
-    store: &ContactStore,
+/// `Err` means nothing was written — the write failed, or the book's sync
+/// state could not be opened and the write was not tried. `Ok` carries the
+/// write's value and whether its upload was queued: a failure to queue does
+/// not undo the local write — the card's text is not at risk — but comes
+/// back as a sentence for a toast, because the edit will not reach the server
+/// until the card is written again, and nobody would otherwise know. A
+/// local-only book queues nothing and is `Ok(())`.
+///
+/// `write` must not queue anything itself: the lock is held around it.
+pub(super) fn write_and_queue<T>(
+    root: &Path,
     book_id: &str,
-    file_name: &str,
-) -> Result<(), String> {
-    queue_push_with_base(store, book_id, file_name, None)
+    file_names: &[&str],
+    write: impl FnOnce() -> Result<T, StoreError>,
+) -> Result<(T, Result<(), String>), cosmic_pim_sync::Error> {
+    let saved = cosmic_pim_sync::save_and_queue(root, book_id, file_names, write)?;
+    let queued = saved
+        .queued
+        .map(|_| ())
+        .map_err(|why| fl!("error-queue-upload", why = why.to_string()));
+    Ok((saved.value, queued))
 }
 
-/// [`queue_push`], carrying the card's pre-edit bytes.
+/// Queues a file a write has just *created* for upload.
 ///
-/// `base` is what the file held when the caller read it — the text the edit
-/// was made against. The queue keeps the base from the first enqueue only, so
-/// stacked unsent edits keep the oldest base (the last text the server
-/// acknowledged) without any bookkeeping here.
-pub(super) fn queue_push_with_base(
+/// For the writes that choose their file's name themselves — a new group
+/// card, the new cards of an import — so the name is not known until the
+/// write returns and [`write_and_queue`] cannot be handed it. Queueing after
+/// the write is safe for these: a sync pass only pulls what the server
+/// lists, and the server has no resource by a name this device just made
+/// up. A failure to queue is returned as a sentence for a toast, as there.
+pub(super) fn queue_created(
     store: &ContactStore,
     book_id: &str,
     file_name: &str,
-    base: Option<&str>,
 ) -> Result<(), String> {
-    cosmic_pim_sync::queue_save_with_base(store.root(), book_id, file_name, base)
+    cosmic_pim_sync::queue_save(store.root(), book_id, file_name)
         .map(|_| ())
         .map_err(|why| fl!("error-queue-upload", why = why.to_string()))
-}
-
-/// The delete-side twin of [`queue_push`].
-pub(super) fn queue_removal(
-    store: &ContactStore,
-    book_id: &str,
-    file_name: &str,
-) -> Result<(), String> {
-    cosmic_pim_sync::queue_delete(store.root(), book_id, file_name)
-        .map(|_| ())
-        .map_err(|why| fl!("error-queue-upload", why = why.to_string()))
-}
-
-/// Queues the server side of deleting one card from `file_name`.
-///
-/// The resource on the server is the file. When the card was the whole file
-/// the resource goes; when the file still holds other cards (an export placed
-/// in a synced book) the rewritten file is uploaded instead — a DELETE would
-/// take everybody else in it off the server too. `before` is the file's text
-/// before the delete, the base for that upload.
-pub(super) fn queue_card_removal(
-    store: &ContactStore,
-    book_id: &str,
-    file_name: &str,
-    before: &str,
-) -> Result<(), String> {
-    let remains = store
-        .book(book_id)
-        .is_some_and(|book| book.path.join(file_name).exists());
-    if remains {
-        queue_push_with_base(store, book_id, file_name, Some(before))
-    } else {
-        queue_removal(store, book_id, file_name)
-    }
 }
 
 /// What a sync pass tells the UI thread.
@@ -499,8 +483,12 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         store.refresh();
 
         let ada = store.contact(&book.id, "ada").unwrap();
-        store.delete(&book.id, "ada").unwrap();
-        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
+        let root = store.root().to_path_buf();
+        let ((), queued) = write_and_queue(&root, &book.id, &[&ada.file_name], || {
+            store.delete(&book.id, "ada")
+        })
+        .unwrap();
+        queued.unwrap();
 
         let pending = VdirStore::open(book).unwrap().pending().unwrap();
         assert_eq!(pending.len(), 1);
@@ -508,6 +496,11 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             matches!(pending[0].op, PushOp::Put { .. }),
             "queued {:?} for a file that still holds Bob",
             pending[0].op
+        );
+        assert_eq!(
+            pending[0].base.as_deref(),
+            Some(TWO),
+            "the upload lost the file's pre-delete text, its merge base"
         );
     }
 
@@ -534,18 +527,27 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         store.refresh();
 
         let ada = store.contact(&book.id, "ada").unwrap();
-        store.delete(&book.id, "ada").unwrap();
-        queue_card_removal(&store, &book.id, &ada.file_name, &ada.raw).unwrap();
+        let root = store.root().to_path_buf();
+        let ((), queued) = write_and_queue(&root, &book.id, &[&ada.file_name], || {
+            store.delete(&book.id, "ada")
+        })
+        .unwrap();
+        queued.unwrap();
 
         let pending = VdirStore::open(book).unwrap().pending().unwrap();
         assert_eq!(pending.len(), 1);
         assert!(matches!(pending[0].op, PushOp::Delete { .. }));
     }
 
-    /// A save that could not be queued stays local and never reaches the
-    /// server; the helpers used to log that and carry on, so nobody knew.
+    /// A book whose sync state cannot be read: a change that could never be
+    /// queued is refused before it is made, and a created file that cannot
+    /// be queued is reported. The helpers used to log that and carry on, so
+    /// nobody knew the edit would never reach the server.
     #[test]
-    fn a_failure_to_queue_an_upload_is_reported() {
+    fn a_write_that_cannot_be_queued_is_refused_or_reported() {
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        const ONE: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\nEND:VCARD\r\n";
         let dir = tempfile::tempdir().unwrap();
         let mut store = ContactStore::open(dir.path()).unwrap();
         let book = store
@@ -554,9 +556,18 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         // The sync state cannot be read: its path is a directory.
         std::fs::create_dir(book.path.join(".caldav-state.json")).unwrap();
 
-        let err = queue_push(&store, &book.id, "ada.vcf").unwrap_err();
+        let refused = write_and_queue(store.root(), &book.id, &["ada.vcf"], || {
+            write_contact_raw(&book, "ada.vcf", ONE)
+        });
+        assert!(refused.is_err());
+        assert!(
+            !book.path.join("ada.vcf").exists(),
+            "the write went ahead with nothing to queue it"
+        );
+
+        write_contact_raw(&book, "new.vcf", ONE).unwrap();
+        let err = queue_created(&store, &book.id, "new.vcf").unwrap_err();
         assert!(!err.is_empty());
-        assert!(queue_removal(&store, &book.id, "ada.vcf").is_err());
     }
 
     /// An account added by Slate while Circle is open shows up on Circle's
