@@ -214,13 +214,17 @@ Two things that patcher does shape what the editor offers:
 - **Grouped entries are edited in place, never rewritten.** Apple attaches a
   custom label by grouping two lines (`item1.EMAIL` + `item1.X-ABLabel`).
   Rewriting the email as an ungrouped line would orphan the label — the classic
-  vCard data-loss site. So in the editor a grouped entry has an editable value,
-  its custom label shown as text, and **no remove button**: dropping it from the
-  list would not remove it from the card, and a control that silently does
-  nothing is worse than one that is absent.
-- **An empty list means "remove", and only for entries this app owns.**
-  Clearing the email list removes the ungrouped addresses and leaves grouped
-  ones alone, because the model does not own their labels.
+  vCard data-loss site. So in the editor a grouped entry has an editable value
+  and its label shown as text.
+- **Removing a grouped entry removes its group.** The patcher never removes a
+  grouped line, so dropping one from the list would leave it on the card. The
+  editor reports which grouped entries were removed and the save takes each
+  out of the card with its label lines (`X-ABLabel`, `X-ABADR`) —
+  [src/grouped.rs](src/grouped.rs) — for emails, phones, websites and
+  addresses alike. If the group also holds something else, only the entry's
+  own line goes and the rest is left as it was. The one grouped entry with no
+  remove button is one that shares its group with another entry of the same
+  kind: the card cannot say which line was meant.
 
 The detail pane and the editor both end with a short list of the properties the
 card carries that Circle will not touch, so what is being preserved is visible

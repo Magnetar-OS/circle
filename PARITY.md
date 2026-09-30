@@ -47,7 +47,7 @@ accessibility.
 | Field editors: name, email, phone, address, org/title, birthday, nickname, website, notes | have | With TYPE labels and one PREF per list. |
 | Categories/tags on a contact | have | Editor field; GNOME Contacts has no categories UI at all — Circle exceeds baseline here. |
 | IM handles (IMPP) editing | partial | Preserved byte-for-byte by the patcher, listed in the "other fields" honesty section, not editable. Verify whether current GNOME Contacts still edits IM at all. |
-| Custom (Apple-grouped) labels | partial | Shown as text, value editable, deliberately not removable — dropping one from the model would not remove it from the card. GNOME does not handle these at all. |
+| Custom (Apple-grouped) labels | partial | Label shown as text, value editable, and the entry removable together with its label lines (`src/grouped.rs`); the label text itself is not editable. GNOME does not handle these at all. |
 | Round-trip safety of unmodeled properties | have | Edits patch the stored bytes; PHOTO, GEO, X- properties, grouped labels survive. Pinned by tests/write_path.rs. GNOME (via EDS) re-serialises. |
 | vCard version discipline | have | New cards 3.0 (4.0 by setting); existing cards keep their declared dialect, never converted silently. |
 

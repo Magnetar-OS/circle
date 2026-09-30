@@ -26,10 +26,16 @@
 //! orphan the label — and dropping it from the list does not delete it, since
 //! the patcher only replaces ungrouped lines.
 //!
-//! So a grouped entry here gets an editable value, its custom label shown as
-//! text, and no remove button. Offering a remove that silently did nothing
-//! would be worse than not offering one: the user would believe the address was
-//! gone and it would reappear on the next read.
+//! So a grouped entry here gets an editable value and its label shown as
+//! text, and removing it is a separate act from editing it: the editor
+//! remembers which grouped entries the card had when it opened, and on save
+//! reports the ones that are gone ([`State::removed_groups`]) so the shell
+//! can take each out of the card *with* its label ([`crate::grouped`]). The
+//! rule is the same for emails, phones, websites and addresses.
+//!
+//! One case has no remove button: two entries of one kind sharing a group.
+//! The card cannot say which of the two lines a removal meant, so neither is
+//! offered — a remove that took both, or neither, would be worse than none.
 
 use cosmic::Element;
 use cosmic::iced::Length;
@@ -160,6 +166,11 @@ pub struct State {
     /// Membership in the book's `KIND:group` cards, applied by the shell on
     /// save — the membership lives on the group cards, not on this contact.
     pub groups: Vec<GroupRow>,
+    /// The grouped entries the card had when the editor opened. What is
+    /// missing from these on save was removed here — and only that: a grouped
+    /// line another writer adds to the card meanwhile was never in this list,
+    /// so it is not mistaken for one the user took out.
+    opened_groups: Vec<crate::grouped::Entry>,
 }
 
 impl State {
@@ -173,6 +184,7 @@ impl State {
         let categories_text = join_categories(&contact.categories);
         let (ids, names) = writable(books);
         Self {
+            opened_groups: crate::grouped::entries(&contact),
             contact,
             is_new: false,
             birthday_text,
@@ -190,6 +202,7 @@ impl State {
     pub fn create(book_id: &str, books: &[CalendarMeta]) -> Self {
         let (ids, names) = writable(books);
         Self {
+            opened_groups: Vec::new(),
             contact: Contact::draft(book_id),
             is_new: true,
             birthday_text: String::new(),
@@ -214,6 +227,22 @@ impl State {
         self.groups
             .iter()
             .filter(|g| g.member != g.was_member)
+            .collect()
+    }
+
+    /// The grouped entries this edit removed: on the card when the editor
+    /// opened, absent from what is about to be saved. A grouped row left
+    /// blank counts, exactly as a blank ungrouped row is dropped on save.
+    ///
+    /// Saving does not remove these — the patcher never removes a grouped
+    /// line — so the shell takes them out of the saved card afterwards.
+    #[must_use]
+    pub fn removed_groups(&self) -> Vec<crate::grouped::Entry> {
+        let kept = crate::grouped::entries(&self.finish());
+        self.opened_groups
+            .iter()
+            .filter(|entry| !kept.contains(entry))
+            .cloned()
             .collect()
     }
 
@@ -302,10 +331,12 @@ impl State {
                 }
                 _ => {
                     let list = list_mut(&mut self.contact, kind);
-                    // Grouped entries have no remove button; guard anyway, so a
-                    // stale message from a re-render cannot delete a row the
-                    // patcher would then silently restore.
-                    if list.get(index).is_some_and(|e| !e.is_grouped()) {
+                    // The view offers no button for a row that shares its
+                    // group; guard anyway, so a stale message from a
+                    // re-render cannot drop a row the save would restore.
+                    if index < list.len()
+                        && !shares_group(list.iter().map(|e| e.group.as_deref()), index)
+                    {
                         list.remove(index);
                     }
                 }
@@ -336,8 +367,11 @@ impl State {
                 }
             }
             Message::AddressRemove(index) => {
-                if index < self.contact.addresses.len() {
-                    self.contact.addresses.remove(index);
+                let addresses = &mut self.contact.addresses;
+                if index < addresses.len()
+                    && !shares_group(addresses.iter().map(|a| a.group.as_deref()), index)
+                {
+                    addresses.remove(index);
                 }
             }
             Message::AddressAdd => self.contact.addresses.push(Address {
@@ -398,6 +432,17 @@ fn writable(books: &[CalendarMeta]) -> (Vec<String>, Vec<String>) {
         .filter(|b| !b.read_only)
         .map(|b| (b.id.clone(), b.name.clone()))
         .unzip()
+}
+
+/// Whether the entry at `index` is grouped and another entry of the same list
+/// carries the same group — the one grouped entry that cannot be removed,
+/// because the card has no way to say which of the two lines was meant.
+fn shares_group<'a>(groups: impl Iterator<Item = Option<&'a str>>, index: usize) -> bool {
+    let groups: Vec<Option<&str>> = groups.collect();
+    match groups.get(index) {
+        Some(Some(group)) => groups.iter().filter(|g| **g == Some(*group)).count() > 1,
+        _ => false,
+    }
 }
 
 fn list_mut(contact: &mut Contact, kind: ListKind) -> &mut Vec<Typed> {
@@ -564,8 +609,7 @@ fn typed_section<'a>(
 
         if entry.is_grouped() {
             // The label lives in a sibling `X-ABLabel` line this editor does
-            // not own. Show it, do not pretend it is editable, and offer no
-            // remove — see the module docs.
+            // not own. Show it, and do not pretend it is editable.
             row = row.push(
                 widget::text::caption(entry.label().unwrap_or_default().to_owned())
                     .class(cosmic::theme::Text::Custom(super::dim_text)),
@@ -579,13 +623,17 @@ fn typed_section<'a>(
                 .push(widget::dropdown(label_names, selected, move |l| {
                     Message::ListLabel(kind, index, l)
                 }))
-                .push(preferred_button(kind, index, entry.pref == Some(1)))
-                .push(widget::tooltip(
-                    widget::button::icon(crate::ui::icon("list-remove-symbolic"))
-                        .on_press(Message::ListRemove(kind, index)),
-                    widget::text::body(fl!("remove")),
-                    widget::tooltip::Position::Top,
-                ));
+                .push(preferred_button(kind, index, entry.pref == Some(1)));
+        }
+        // Grouped or not, an entry can be removed — see the module docs for
+        // the one that cannot.
+        if !shares_group(values.iter().map(|e| e.group.as_deref()), index) {
+            row = row.push(widget::tooltip(
+                widget::button::icon(crate::ui::icon("list-remove-symbolic"))
+                    .on_press(Message::ListRemove(kind, index)),
+                widget::text::body(fl!("remove")),
+                widget::tooltip::Position::Top,
+            ));
         }
 
         section = section.add(row);
@@ -661,8 +709,9 @@ fn address_section(state: &State) -> Element<'_, Message> {
     let spacing = cosmic::theme::spacing();
     let mut section = widget::settings::section().title(fl!("address"));
 
-    for (index, address) in state.contact.addresses.iter().enumerate() {
-        let block = widget::column::with_capacity(7)
+    let addresses = &state.contact.addresses;
+    for (index, address) in addresses.iter().enumerate() {
+        let mut block = widget::column::with_capacity(7)
             .spacing(spacing.space_xxs)
             .push(address_row(
                 fl!("address-street"),
@@ -699,8 +748,11 @@ fn address_section(state: &State) -> Element<'_, Message> {
                 &address.country,
                 index,
                 AddressPart::Country,
-            ))
-            .push(widget::button::text(fl!("remove")).on_press(Message::AddressRemove(index)));
+            ));
+        if !shares_group(addresses.iter().map(|a| a.group.as_deref()), index) {
+            block = block
+                .push(widget::button::text(fl!("remove")).on_press(Message::AddressRemove(index)));
+        }
 
         section = section.add(block);
     }
@@ -993,8 +1045,6 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
         assert_eq!(state.contact.phones[0].types, vec!["mobile", "voice"]);
     }
 
-    /// Dropping a grouped entry from the list would not remove it from the
-    /// card, so the control does not exist and the handler refuses too.
     #[test]
     fn categories_round_trip_through_the_text_field() {
         for original in [
@@ -1027,23 +1077,110 @@ PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nGEO:geo:37.98,23.72\r\nEND:VC
         assert!(split_categories("   ").is_empty());
     }
 
+    const GROUPED: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\n\
+EMAIL;type=WORK:ada@work.example\r\n\
+item1.EMAIL;type=INTERNET:ada@home.example\r\nitem1.X-ABLabel:Summer house\r\n\
+item2.TEL:+30 210 1234567\r\nitem2.X-ABLabel:Boat\r\n\
+item3.ADR;type=HOME:;;1 Main St;Athens;;10431;GR\r\nitem3.X-ABLabel:Winter\r\n\
+item4.URL:https://ada.example\r\nitem4.X-ABLabel:Site\r\nEND:VCARD\r\n";
+
+    fn editing(raw: &str) -> State {
+        let contact = cosmic_pim_core::vcard::parse_vcards(raw, "personal", "ada.vcf").remove(0);
+        State::edit(contact, &[])
+    }
+
+    fn entry(property: &'static str, group: &str) -> crate::grouped::Entry {
+        crate::grouped::Entry {
+            property,
+            group: group.to_owned(),
+        }
+    }
+
+    /// The rule is one rule. A grouped address could be removed and a
+    /// grouped email, phone or website could not — and the address came back
+    /// on the next read, because saving never removes a grouped line. Now
+    /// all four are removed, and each is named for the save to take out.
     #[test]
-    fn a_grouped_entry_cannot_be_removed() {
-        let mut state = state();
-        state.contact.emails.push(Typed {
-            value: "ada@home.example".into(),
-            types: vec!["internet".into()],
-            pref: None,
-            group: Some("item1".into()),
-            params: Vec::new(),
-        });
+    fn a_grouped_entry_of_any_kind_is_removed_and_named_for_the_save() {
+        let mut state = editing(GROUPED);
+        assert!(state.removed_groups().is_empty(), "nothing was removed yet");
+
+        state.update(Message::ListRemove(ListKind::Email, 1));
+        state.update(Message::ListRemove(ListKind::Phone, 0));
+        state.update(Message::ListRemove(ListKind::Url, 0));
+        state.update(Message::AddressRemove(0));
+
+        assert_eq!(state.contact.emails.len(), 1, "the ungrouped email stays");
+        assert!(state.contact.phones.is_empty());
+        assert!(state.contact.urls.is_empty());
+        assert!(state.contact.addresses.is_empty());
+        assert_eq!(
+            state.removed_groups(),
+            [
+                entry("EMAIL", "item1"),
+                entry("TEL", "item2"),
+                entry("URL", "item4"),
+                entry("ADR", "item3"),
+            ]
+        );
+    }
+
+    /// An ungrouped entry is removed by the save itself; naming it would ask
+    /// the shell to remove a group that does not exist.
+    #[test]
+    fn removing_an_ungrouped_entry_names_no_group() {
+        let mut state = editing(GROUPED);
+        state.update(Message::ListRemove(ListKind::Email, 0));
+        assert_eq!(state.contact.emails.len(), 1);
+        assert!(state.removed_groups().is_empty());
+    }
+
+    /// A blank row is dropped on save, grouped or not. For a grouped one
+    /// that has to reach the card too, or the emptied address is back on the
+    /// next read.
+    #[test]
+    fn a_grouped_entry_left_blank_is_removed_with_its_group() {
+        let mut state = editing(GROUPED);
+        state.update(Message::ListValue(ListKind::Phone, 0, "  ".into()));
+        for part in [
+            AddressPart::Street,
+            AddressPart::Locality,
+            AddressPart::PostalCode,
+            AddressPart::Country,
+        ] {
+            state.update(Message::AddressPart(0, part, String::new()));
+        }
+        assert_eq!(
+            state.removed_groups(),
+            [entry("TEL", "item2"), entry("ADR", "item3")]
+        );
+    }
+
+    /// Two lines of one kind in one group: the card cannot say which one a
+    /// removal meant, so neither row is removable.
+    #[test]
+    fn entries_sharing_a_group_cannot_be_removed_one_at_a_time() {
+        let shared = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada\r\n\
+item1.EMAIL:ada@one.example\r\nitem1.EMAIL:ada@two.example\r\nitem1.X-ABLabel:Both\r\n\
+item2.ADR:;;1 Main St;Athens;;;GR\r\nitem2.ADR:;;2 Side St;Patras;;;GR\r\n\
+END:VCARD\r\n";
+        let mut state = editing(shared);
 
         state.update(Message::ListRemove(ListKind::Email, 0));
-        assert_eq!(
-            state.contact.emails.len(),
-            1,
-            "a grouped entry was dropped from the model but would survive on disk"
-        );
+        state.update(Message::AddressRemove(1));
+        assert_eq!(state.contact.emails.len(), 2);
+        assert_eq!(state.contact.addresses.len(), 2);
+        assert!(state.removed_groups().is_empty());
+    }
+
+    /// A new contact has no card, so nothing on it can have been grouped.
+    #[test]
+    fn a_new_contact_never_names_a_group() {
+        let mut state = state();
+        state.contact.display_name = "Ada".into();
+        state.update(Message::AddressAdd);
+        state.update(Message::AddressRemove(0));
+        assert!(state.removed_groups().is_empty());
     }
 
     #[test]

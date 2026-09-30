@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- An address with a custom label (the kind iCloud and Apple Contacts write)
+  could be removed in the editor, but was back the next time the contact was
+  opened; an email, phone or website with a custom label had no remove button
+  at all. All four can now be removed, and the label goes with them instead
+  of being left on the card labelling nothing. Emptying such an entry removes
+  it too.
+
 ## [1.2.0] - 2026-09-29
 
 ### Added

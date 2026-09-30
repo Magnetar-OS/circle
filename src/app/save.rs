@@ -87,6 +87,7 @@ impl AppModel {
 
         let contact = state.finish();
         let photo_edit = state.photo.clone();
+        let removed_groups = state.removed_groups();
         let changed_groups: Vec<editor::GroupRow> =
             state.changed_groups().into_iter().cloned().collect();
         let version = self.write_version();
@@ -124,6 +125,13 @@ impl AppModel {
             None => Ok(()),
         };
 
+        // A grouped entry removed in the editor is still on the saved card:
+        // the patcher edits grouped lines in place and never removes one. It
+        // goes here, with its label. Reported with the queue's outcome — the
+        // save itself landed either way.
+        let removal = remove_grouped_entries(store, &contact, &removed_groups);
+        let queued = queued.and(removal);
+
         // The photo change runs against the *saved* bytes, which is what makes
         // it uniform for new and existing cards: after the save above, both
         // have a card on disk to patch. The photo is not part of the model on
@@ -159,6 +167,30 @@ impl AppModel {
         }
         Task::none()
     }
+}
+
+/// Takes the grouped entries the editor removed out of the just-saved card,
+/// each with the label lines that belong to it — see [`crate::grouped`].
+fn remove_grouped_entries(
+    store: &ContactStore,
+    contact: &Contact,
+    removed: &[crate::grouped::Entry],
+) -> Result<(), String> {
+    use cosmic_pim_core::store::contacts::write_contact_raw;
+
+    if removed.is_empty() {
+        return Ok(());
+    }
+    let saved = store
+        .contact(&contact.addressbook_id, &contact.uid)
+        .ok_or_else(|| fl!("error-load-contacts"))?;
+    let stripped = crate::grouped::remove(&saved.raw, &contact.uid, removed)
+        .ok_or_else(|| fl!("error-load-contacts"))?;
+    let meta = store
+        .book(&contact.addressbook_id)
+        .ok_or_else(|| fl!("error-load-contacts"))?;
+    write_contact_raw(meta, &saved.file_name, &stripped)
+        .map_err(|why| save_error(&contact.label(), &why))
 }
 
 /// Applies the editor's photo intent to the just-saved card, through the
@@ -350,6 +382,75 @@ fn photo_mime(path: &std::path::Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole path, through a real address book: a grouped address and a
+    /// grouped email removed in the editor are gone from the card after the
+    /// save, their labels with them, and everything the editor does not
+    /// model is still there. Before, the address came back on the next read
+    /// and the email could not be removed at all.
+    #[test]
+    fn a_grouped_entry_removed_in_the_editor_leaves_the_card_with_its_label() {
+        use cosmic_pim_core::store::contacts::write_contact_raw;
+
+        const CARD: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:ada\r\nFN:Ada Lovelace\r\n\
+EMAIL;type=WORK:ada@work.example\r\n\
+item1.EMAIL;type=INTERNET:ada@home.example\r\nitem1.X-ABLabel:Summer house\r\n\
+item2.TEL:+30 210 1234567\r\nitem2.X-ABLabel:Boat\r\n\
+item3.ADR;type=HOME:;;1 Main St;Athens;;10431;GR\r\nitem3.X-ABLabel:Winter\r\n\
+item3.X-ABADR:gr\r\n\
+PHOTO;ENCODING=b:AAAABBBB\r\nX-ABShowAs:COMPANY\r\nEND:VCARD\r\n";
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ContactStore::open(dir.path()).unwrap();
+        let book = store
+            .create_book("Home", cosmic_pim_core::model::Rgb(1, 2, 3))
+            .unwrap();
+        write_contact_raw(&book, "ada.vcf", CARD).unwrap();
+        store.refresh();
+        let books = store.books().to_vec();
+
+        let mut state = editor::State::edit(store.contact(&book.id, "ada").unwrap(), &books);
+        state.update(editor::Message::AddressRemove(0));
+        state.update(editor::Message::ListRemove(editor::ListKind::Email, 1));
+        let contact = state.finish();
+        store.save(&contact).unwrap();
+        remove_grouped_entries(&store, &contact, &state.removed_groups()).unwrap();
+
+        let saved = store.contact(&book.id, "ada").unwrap();
+        assert!(
+            saved.addresses.is_empty(),
+            "the address is back: {}",
+            saved.raw
+        );
+        assert_eq!(saved.emails.len(), 1, "{}", saved.raw);
+        assert_eq!(saved.emails[0].value, "ada@work.example");
+        for orphan in ["item1.", "item3.", "Summer house", "Winter", "X-ABADR"] {
+            assert!(
+                !saved.raw.contains(orphan),
+                "{orphan} was left behind:\n{}",
+                saved.raw
+            );
+        }
+        // The grouped phone nobody touched, and what Circle does not model.
+        for kept in [
+            "item2.TEL:+30 210 1234567\r\nitem2.X-ABLabel:Boat\r\n",
+            "PHOTO;ENCODING=b:AAAABBBB\r\n",
+            "X-ABShowAs:COMPANY\r\n",
+        ] {
+            assert!(saved.raw.contains(kept), "{kept} is gone:\n{}", saved.raw);
+        }
+    }
+
+    /// Nothing removed means nothing written: an ordinary save must not
+    /// rewrite the file a second time.
+    #[test]
+    fn a_save_that_removed_no_grouped_entry_does_not_touch_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ContactStore::open(dir.path()).unwrap();
+        // No such book or card: reaching for either would be an error.
+        let contact = Contact::draft("nowhere");
+        assert_eq!(remove_grouped_entries(&store, &contact, &[]), Ok(()));
+    }
 
     /// A save that lost a race with another writer says so, and names the
     /// file this version was kept in, rather than the substrate's English.
