@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `6af8b70`).
+
 ### Added
 
 - **Favorites.** Star a contact with the star beside their name, from a
