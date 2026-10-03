@@ -463,7 +463,7 @@ impl AppModel {
     pub(super) fn check_range_to(&mut self, key: &ContactKey) {
         let position = |k: &ContactKey| self.contacts.iter().position(|c| k.matches(c));
         let (Some(anchor), Some(target)) =
-            (self.selected.as_ref().and_then(&position), position(key))
+            (self.selected.as_ref().and_then(position), position(key))
         else {
             self.checked.insert(key.clone());
             return;
