@@ -97,9 +97,16 @@ expect_failure() {
     esac
 }
 
+# The mutation matches whatever version the manifest declares rather than
+# naming it. Naming it has broken this row twice: a repository-wide
+# replacement of the old version turned the substitution into the identity,
+# and — because the tree under test is HEAD while this script is the working
+# copy — a bump that is edited but not yet committed looks for a version HEAD
+# does not have. Either way the manifest was left alone and the row could not
+# fail for the reason it exists.
 expect_failure "toolchain: manifest below the pinned channel" \
     "Raise both together" \
-    "sed -i 's/^rust-version = \"1.98.1\"/rust-version = \"1.98.0\"/' Cargo.toml"
+    "sed -i 's/^rust-version = \".*\"/rust-version = \"1.0.0\"/' Cargo.toml"
 
 expect_failure "lockfile: names a crate CI cannot fetch" \
     "cosmic-ext-nib-text" \
