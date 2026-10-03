@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-03
+
 ### Changed
 
 - Rebuilt against the current COSMIC libraries (libcosmic `5a8bd94`).
@@ -396,7 +398,8 @@ All notable changes to this project are documented here. The format follows
   buttons in the editor, and the back button in the narrow layout — now has a
   tooltip. An icon alone is not a name.
 
-[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/Magnetar-OS/circle/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/Magnetar-OS/circle/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Magnetar-OS/circle/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Magnetar-OS/circle/compare/v1.1.0...v1.2.0
