@@ -7,7 +7,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 description = "Circle — contacts for the COSMIC desktop"
 repository = "https://github.com/Magnetar-OS/circle"
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 # Not on crates.io: this application links libcosmic, a git dependency, and
 # the registry refuses any crate that carries one. Circle ships as a
 # distribution package, not as a crate.
