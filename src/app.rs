@@ -369,6 +369,9 @@ pub enum Message {
     PreferVcard4(bool),
     SyncInterval(usize),
 
+    /// Open the desktop's Accounts window, where an account is added for the
+    /// whole suite by its address.
+    OpenAccountsWindow,
     AccountAddStart,
     AccountAddCancel,
     AccountAddConfirm,
@@ -1065,6 +1068,12 @@ impl AppModel {
                 self.persist_config();
             }
 
+            Message::OpenAccountsWindow => {
+                sync::add_account_elsewhere(
+                    &mut self.account_form,
+                    crate::handoff::ACCOUNTS_WINDOW,
+                );
+            }
             Message::AccountAddStart => self.account_form = Some(AccountForm::default()),
             Message::AccountAddCancel => self.account_form = None,
             Message::AccountAddConfirm => return self.confirm_account(),

@@ -197,6 +197,7 @@ read-only-book = Το { $name } είναι μόνο για ανάγνωση.
 accounts = Λογαριασμοί
 sync = Συγχρονισμός
 add-account = Προσθήκη λογαριασμού…
+add-server = Προσθήκη διακομιστή…
 account-name = Όνομα
 server-url = Διεύθυνση διακομιστή
 username = Όνομα χρήστη

@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Add account opens the desktop's Accounts window, which takes an address and
+  works out the rest; the account it adds brings mail and calendars to
+  Envelope and Slate too. The server form stays, as Add a server, for a
+  CardDAV server typed in by its address, and opens by itself where the
+  Accounts window is not installed.
+
 ## [1.3.2] - 2026-10-03
 
 ### Changed

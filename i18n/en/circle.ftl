@@ -193,6 +193,8 @@ read-only-book = { $name } is read-only.
 accounts = Accounts
 sync = Sync
 add-account = Add account…
+# Beside Add account: a CardDAV server typed in by its address.
+add-server = Add a server…
 account-name = Name
 server-url = Server address
 username = Username

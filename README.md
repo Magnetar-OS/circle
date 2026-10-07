@@ -72,7 +72,12 @@ Reading, searching, creating, editing, and deleting contacts all work.
   card in its own dialect. Remote photo URIs are deliberately never fetched —
   no network for avatars, by design.
 - **Accounts and sync.** The Accounts page lists the suite's shared CardDAV
-  accounts, adds one from a URL, username, and password, and syncs on demand
+  accounts. *Add account* opens the desktop's Accounts window
+  (`magnetar-accounts --for=contacts`), which takes an address and works out
+  the rest; *Add a server* is Circle's own form — a URL, username, and
+  password — and is what *Add account* opens where the Accounts window is not
+  installed.
+  Sync runs on demand
   or on a background cadence (off by default). Local edits, deletes, imports,
   and group changes are queued for upload to the server their book is bound
   to; a book with no binding stays local and queues nothing.

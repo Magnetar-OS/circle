@@ -10,7 +10,7 @@ use cosmic::widget;
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
-use super::{AppModel, ContextPage, Message};
+use super::{AccountForm, AppModel, ContextPage, Message};
 use crate::fl;
 
 impl AppModel {
@@ -204,6 +204,18 @@ impl AppModel {
 
             Message::SyncFinished(outcome)
         })
+    }
+}
+
+/// What Add account does: starts the desktop's Accounts window, which takes
+/// an address and works out the rest. Where `program` cannot be started —
+/// the Accounts window is a package of its own, and may not be installed —
+/// the server form here opens instead, which does the job for a CardDAV
+/// account.
+pub(super) fn add_account_elsewhere(form: &mut Option<AccountForm>, program: &str) {
+    if let Err(why) = crate::handoff::start(crate::handoff::add_account(program)) {
+        tracing::info!(%why, "no Accounts window; using the server form");
+        *form = Some(AccountForm::default());
     }
 }
 
@@ -879,5 +891,26 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         slate.remove(&id).unwrap();
         reload_account_store(&mut circle).unwrap();
         assert!(circle.accounts().is_empty());
+    }
+
+    #[test]
+    fn without_the_accounts_window_add_account_opens_the_server_form() {
+        // A desktop without the Accounts window installed must still be able
+        // to add an account.
+        let mut form = None;
+
+        add_account_elsewhere(&mut form, "/nonexistent/magnetar-accounts");
+
+        assert!(form.is_some(), "nothing opened to add an account with");
+    }
+
+    #[test]
+    fn with_the_accounts_window_the_server_form_stays_closed() {
+        // `true` stands in for the Accounts window: it starts.
+        let mut form = None;
+
+        add_account_elsewhere(&mut form, "true");
+
+        assert!(form.is_none());
     }
 }
