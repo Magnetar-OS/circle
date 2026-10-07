@@ -17,6 +17,16 @@ All notable changes to this project are documented here. The format follows
   Slate — appears on the Accounts page within a couple of seconds, without a
   restart, and its contacts are fetched at once.
 
+### Fixed
+
+- `con ada` in the COSMIC launcher finds Ada. It never had: the launcher
+  plugin was installed under `/usr/share`, where pop-launcher does not look,
+  and its manifest was written in a form pop-launcher refuses to read. The
+  plugin is now installed under `/usr/lib/pop-launcher/plugins` — or
+  `~/.local/share` for a per-user install — with its program linked in beside
+  it, and the manifest is one pop-launcher loads. It answers only queries
+  that start with `con `, and those it answers alone.
+
 ## [1.3.2] - 2026-10-03
 
 ### Changed

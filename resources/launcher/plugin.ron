@@ -1,15 +1,23 @@
+// Read by pop-launcher with RON's `implicit_some`: an optional field is
+// written bare. `Some(...)` is a parse error there — "malformed config", in
+// pop-launcher's own log and nowhere else — and the plugin is skipped.
 (
     name: "Circle",
     description: "Search your contacts",
     bin: (
         path: "circle-launcher",
     ),
-    icon: Some(Name("avatar-default-symbolic")),
+    icon: Name("avatar-default-symbolic"),
     query: (
-        // Only run when the query starts with "con ", so the plugin does not
-        // search every keystroke typed into the launcher.
-        help: Some("con "),
-        isolate: false,
+        // Only run when the query starts with "con ". pop-launcher routes a
+        // query to a plugin by its `regex`; a plugin without one receives
+        // every query, and this one would search the address book on every
+        // keystroke typed into the launcher. `help` is only the hint shown.
+        regex: "^con ",
+        help: "con ",
+        // Once the user has typed the prefix they asked for people; other
+        // plugins' matches for "con ada" are noise.
+        isolate: true,
         persistent: false,
         priority: Default,
     ),

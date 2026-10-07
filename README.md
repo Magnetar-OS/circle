@@ -195,6 +195,7 @@ the window. They land in `target/xdgen/`, which is what `just install` and
 | `~/.local/share/contacts/` | Your address books. One directory per book, one `.vcf` per contact. |
 | `~/.config/cosmic-pim/accounts.toml` | Accounts, shared with Slate and Envelope. Passwords are in the keychain, never here. |
 | `~/.config/cosmic/com.magnetaros.Circle/v1/` | Settings, via `cosmic-config`: hidden books, default book, sort order. |
+| `/usr/lib/pop-launcher/plugins/circle/` | Launcher plugin registration, with `circle-launcher` linked in beside it. `~/.local/share/pop-launcher/plugins/circle/` for a per-user prefix. |
 
 A book looks like this, which is what `vdirsyncer` writes:
 

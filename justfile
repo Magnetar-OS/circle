@@ -37,8 +37,12 @@ icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
 icon-dst := icons-dst / 'scalable' / 'apps' / (appid + '.svg')
 icon-symbolic-dst := icons-dst / 'symbolic' / 'apps' / (appid + '-symbolic.svg')
 launcher-bin-dst := base-dir / 'bin' / launcher
-# pop-launcher discovers plugins under share/pop-launcher/plugins/<name>/.
-launcher-plugin-dst := base-dir / 'share' / 'pop-launcher' / 'plugins' / name / 'plugin.ron'
+# pop-launcher searches ~/.local/share, /etc and /usr/lib — so lib for a
+# system install and share for a per-user one; a plugin in /usr/share is never
+# found.
+launcher-root := if prefix == '/usr' { 'lib' } else { 'share' }
+launcher-dir := base-dir / launcher-root / 'pop-launcher' / 'plugins' / name
+launcher-plugin-dst := launcher-dir / 'plugin.ron'
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -225,6 +229,9 @@ install: build-release
             {{icons-dst}}/$size/apps/{{appid}}.png; \
     done
     install -Dm0644 {{launcher-plugin-src}} {{launcher-plugin-dst}}
+    # pop-launcher runs `bin.path` from the plugin's own directory, so the
+    # binary is linked in beside the manifest, as the stock plugins do it.
+    ln -sf ../../../../bin/{{launcher}} {{launcher-dir}}/{{launcher}}
     if [ -z '{{rootdir}}' ]; then \
         update-desktop-database {{ base-dir / 'share' / 'applications' }} || true; \
         gtk-update-icon-cache -f -t {{ base-dir / 'share' / 'icons' / 'hicolor' }} || true; \
@@ -232,7 +239,7 @@ install: build-release
 
 # Uninstalls installed files
 uninstall:
-    rm -f {{bin-dst}} {{launcher-bin-dst}} {{desktop-dst}} {{metainfo-dst}} {{icon-dst}} {{launcher-plugin-dst}}
+    rm -f {{bin-dst}} {{launcher-bin-dst}} {{desktop-dst}} {{metainfo-dst}} {{icon-dst}} {{launcher-plugin-dst}} {{launcher-dir}}/{{launcher}}
     rm -f {{icon-symbolic-dst}}
     for size in {{icon-sizes}}; do \
         rm -f {{icons-dst}}/$size/apps/{{appid}}.png; \
