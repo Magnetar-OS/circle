@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
   Envelope and Slate too. The server form stays, as Add a server, for a
   CardDAV server typed in by its address, and opens by itself where the
   Accounts window is not installed.
+- An account added in another application — the Accounts window, Envelope,
+  Slate — appears on the Accounts page within a couple of seconds, without a
+  restart, and its contacts are fetched at once.
 
 ## [1.3.2] - 2026-10-03
 

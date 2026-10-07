@@ -77,6 +77,8 @@ Reading, searching, creating, editing, and deleting contacts all work.
   the rest; *Add a server* is Circle's own form — a URL, username, and
   password — and is what *Add account* opens where the Accounts window is not
   installed.
+  An account added anywhere else shows up within a couple of seconds and is
+  synced at once.
   Sync runs on demand
   or on a background cadence (off by default). Local edits, deletes, imports,
   and group changes are queued for upload to the server their book is bound

@@ -215,6 +215,9 @@ pub struct AppModel {
     /// the whole suite. `None` when the account store could not be opened; the
     /// address book still works, it just cannot sync.
     accounts: Option<cosmic_pim_accounts::AccountStore>,
+    /// The account list's size and modification time when it was last read,
+    /// so an account added in another application is noticed.
+    accounts_stamp: sync::Stamp,
     /// The in-progress "add an account" form on the Accounts page.
     account_form: Option<AccountForm>,
     /// A sync pass is in flight. One at a time: two passes racing on the same
@@ -372,6 +375,8 @@ pub enum Message {
     /// Open the desktop's Accounts window, where an account is added for the
     /// whole suite by its address.
     OpenAccountsWindow,
+    /// Time to look whether the shared account list changed on disk.
+    AccountsFileCheck,
     AccountAddStart,
     AccountAddCancel,
     AccountAddConfirm,
@@ -589,6 +594,7 @@ impl cosmic::Application for AppModel {
             can_map: false,
             folded: HashMap::new(),
             review: None,
+            accounts_stamp: sync::accounts_file_stamp(),
             accounts,
             account_form: None,
             syncing: false,
@@ -848,6 +854,11 @@ impl cosmic::Application for AppModel {
                     Message::UpdateConfig(update.config)
                 }),
             file_watch_subscription(),
+            // Accounts are the suite's: one added in the Accounts window, or
+            // in Envelope or Slate, appears here without a restart. A `stat`
+            // every two seconds.
+            cosmic::iced::time::every(sync::ACCOUNTS_FILE_CHECK)
+                .map(|_| Message::AccountsFileCheck),
             // Only `Ignored` presses: a focused text input has already claimed
             // anything it wants, so the editor keeps its own keys. The physical
             // key travels too — it is what lets Ctrl+N fire on a Greek or
@@ -1073,6 +1084,12 @@ impl AppModel {
                     &mut self.account_form,
                     crate::handoff::ACCOUNTS_WINDOW,
                 );
+            }
+            Message::AccountsFileCheck => {
+                let path = cosmic_pim_accounts::account::default_config_path();
+                if sync::stamp_changed(&mut self.accounts_stamp, &path) {
+                    return self.accounts_file_changed();
+                }
             }
             Message::AccountAddStart => self.account_form = Some(AccountForm::default()),
             Message::AccountAddCancel => self.account_form = None,
