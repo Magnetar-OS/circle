@@ -19,12 +19,14 @@ use cosmic::widget;
 use crate::app::{AccountForm, Message};
 use crate::conflicts::{ConflictRow, Resolution};
 use crate::fl;
+use cosmic_pim_accounts::{Account, Registry};
 use cosmic_pim_core::merge::{Overlap, Side};
 
 /// One row per account, plus the add form or the button that opens it, and
 /// any sync conflicts awaiting an answer.
 pub fn view<'a>(
     accounts: &'a [cosmic_pim_accounts::Account],
+    registry: &cosmic_pim_accounts::Registry,
     form: Option<&'a AccountForm>,
     syncing: bool,
     status: Option<&'a str>,
@@ -45,7 +47,7 @@ pub fn view<'a>(
         for account in accounts {
             list = list.add(
                 widget::settings::item::builder(account.display_name.clone())
-                    .description(format!("{} · {}", account.username, account.url))
+                    .description(description(account, registry))
                     .control(
                         widget::button::text(fl!("remove"))
                             .class(cosmic::theme::Button::Destructive)
@@ -102,6 +104,48 @@ pub fn view<'a>(
     }
 
     column.into()
+}
+
+/// What an account row says under the account's name: its login, where its
+/// contacts come from, and, for one GNOME Online Accounts keeps signed in,
+/// that it is kept there.
+///
+/// An account made from a provider carries no URL of its own (cosmic-pim 3
+/// reads both of the provider's addresses from its manifest), and neither
+/// does one linked from Online Accounts, so the row cannot print
+/// `account.url` and has to ask where the sync pass will look.
+fn description(account: &Account, registry: &Registry) -> String {
+    let mut parts = vec![account.username.clone()];
+    parts.push(contacts_address(account, registry).unwrap_or_else(|| fl!("account-no-contacts")));
+    if account.online_account().is_some() {
+        parts.push(fl!("account-via-online-accounts"));
+    }
+    parts.join(" · ")
+}
+
+/// The CardDAV address the sync pass reads this account's address books
+/// from, or `None` when it has none — a mail-only account, or a provider
+/// with no CardDAV, such as Microsoft.
+///
+/// Whether there is one is the sync engine's answer
+/// ([`cosmic_pim_sync::setup::services_of`]). Which one is the engine's rule
+/// too, restated because the engine keeps it private: the account's own URL
+/// wins, except when it is exactly the provider's calendar address — what
+/// cosmic-pim 2 stored as a provider account's URL — and otherwise the
+/// provider's contacts address.
+fn contacts_address(account: &Account, registry: &Registry) -> Option<String> {
+    if !cosmic_pim_sync::setup::services_of(account, registry).contacts {
+        return None;
+    }
+    let provider = account.provider.as_deref().and_then(|id| registry.get(id));
+    let own = account.url.trim();
+    let inherited = provider
+        .and_then(|provider| provider.calendar_url(&account.username))
+        .is_some_and(|calendar| calendar == own);
+    if !own.is_empty() && !inherited {
+        return Some(own.to_owned());
+    }
+    provider.and_then(|provider| provider.contacts_url(&account.username))
 }
 
 /// Unresolved sync conflicts: who each side says the card is, and the ways
@@ -311,4 +355,111 @@ fn add_form(form: &AccountForm) -> Element<'_, Message> {
                 }),
         )
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Built-in manifests only: an empty overlay directory.
+    fn registry() -> (tempfile::TempDir, Registry) {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Registry::load_from(dir.path());
+        (dir, registry)
+    }
+
+    /// cosmic-pim 3 leaves a provider account's URL empty. The row used to
+    /// print that URL, so it showed nothing; it shows the provider's CardDAV
+    /// address, which is where the sync pass now finds the address books.
+    #[test]
+    fn a_provider_account_shows_its_providers_contacts_address() {
+        let (_dir, registry) = registry();
+        let fastmail = registry.get("fastmail").unwrap();
+        let account = fastmail.account_for("ada@fastmail.com");
+        assert_eq!(account.url, "");
+
+        let contacts = fastmail.contacts_url("ada@fastmail.com").unwrap();
+        assert_eq!(
+            contacts_address(&account, &registry),
+            Some(contacts.clone())
+        );
+        assert_eq!(
+            description(&account, &registry),
+            format!("ada@fastmail.com · {contacts}")
+        );
+    }
+
+    /// An account cosmic-pim 2 made from a manifest carries the calendar
+    /// address as its own. Its address books are not there, and the row does
+    /// not say they are.
+    #[test]
+    fn an_account_stored_by_cosmic_pim_2_shows_contacts_not_calendars() {
+        let (_dir, registry) = registry();
+        let fastmail = registry.get("fastmail").unwrap();
+        let mut account = fastmail.account_for("ada@fastmail.com");
+        account.url = fastmail.calendar_url("ada@fastmail.com").unwrap();
+
+        assert_eq!(
+            contacts_address(&account, &registry),
+            fastmail.contacts_url("ada@fastmail.com")
+        );
+    }
+
+    /// A server typed into the form is the address, provider or not.
+    #[test]
+    fn a_typed_server_shows_its_own_address() {
+        let (_dir, registry) = registry();
+        let account = Account::new("Home", "https://dav.example.com/", "ada");
+        assert_eq!(
+            description(&account, &registry),
+            "ada · https://dav.example.com/"
+        );
+    }
+
+    /// A Google account linked from GNOME Online Accounts has no URL and no
+    /// password here; its row names Google's CardDAV address and where its
+    /// sign-in is kept.
+    #[test]
+    fn an_online_account_says_where_it_signs_in() {
+        let (_dir, registry) = registry();
+        let account =
+            Account::for_online_account("Google", "ada@gmail.com", "google", "account_1").unwrap();
+        let contacts = registry
+            .get("google")
+            .unwrap()
+            .contacts_url("ada@gmail.com")
+            .unwrap();
+        assert_eq!(
+            description(&account, &registry),
+            format!(
+                "ada@gmail.com · {contacts} · {}",
+                fl!("account-via-online-accounts")
+            )
+        );
+    }
+
+    /// An account with nowhere to find contacts says so rather than showing
+    /// an empty address: Microsoft has no CardDAV, and a Gmail app-password
+    /// account is mail only.
+    #[test]
+    fn an_account_without_address_books_says_so() {
+        let (_dir, registry) = registry();
+        let microsoft =
+            Account::for_online_account("Microsoft", "ada@outlook.com", "microsoft", "account_2")
+                .unwrap();
+        let gmail = registry
+            .get("google")
+            .unwrap()
+            .app_password_account("ada@gmail.com")
+            .unwrap();
+
+        for account in [&microsoft, &gmail] {
+            assert_eq!(contacts_address(account, &registry), None);
+            assert!(
+                description(account, &registry).contains(&fl!("account-no-contacts")),
+                "{}",
+                description(account, &registry)
+            );
+        }
+    }
 }

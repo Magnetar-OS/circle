@@ -200,6 +200,9 @@ server-url = Server address
 username = Username
 password = Password
 app-password-hint = Many providers require an app-specific password rather than your normal one.
+# An account row's description: its login, then where its contacts come from.
+account-no-contacts = no address books
+account-via-online-accounts = signed in through GNOME Online Accounts
 no-accounts-description =
     Add a CardDAV account to sync your contacts with a server. Accounts are
     shared with Slate — an account added there is already here.

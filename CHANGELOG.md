@@ -28,6 +28,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Each account on the Accounts page says where its contacts come from. An
+  account made from a provider, or linked from GNOME Online Accounts, showed
+  only its login followed by a dot; one stored by an earlier version showed
+  its provider's calendar address. An account with no address books — a
+  Microsoft account, a Gmail account added with an app password — now says
+  so, and one GNOME Online Accounts keeps signed in says that too.
 - `con ada` in the COSMIC launcher finds Ada. It never had: the launcher
   plugin was installed under `/usr/share`, where pop-launcher does not look,
   and its manifest was written in a form pop-launcher refuses to read. The

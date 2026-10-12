@@ -115,12 +115,14 @@ impl AppModel {
         }
     }
 
-    /// Re-reads the shared account store before the Accounts page shows it.
+    /// Re-reads the shared account store, and the provider manifests its
+    /// rows are described from, before the Accounts page shows it.
     ///
     /// The handle lives as long as the window, and Slate, Envelope and every
     /// sync pass write the same `accounts.toml`; a list from start-up would
     /// show accounts removed elsewhere and miss ones added there.
     pub(super) fn reload_accounts(&mut self) -> Task<Message> {
+        self.registry = cosmic_pim_accounts::Registry::load();
         match self.accounts.as_mut().map(reload_account_store) {
             Some(Err(why)) => self.toast(why),
             _ => Task::none(),

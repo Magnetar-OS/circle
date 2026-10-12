@@ -215,6 +215,9 @@ pub struct AppModel {
     /// the whole suite. `None` when the account store could not be opened; the
     /// address book still works, it just cannot sync.
     accounts: Option<cosmic_pim_accounts::AccountStore>,
+    /// Provider manifests, for what the Accounts page says about an account
+    /// that came from one. Re-read with the account list when the page opens.
+    registry: cosmic_pim_accounts::Registry,
     /// The account list's size and modification time when it was last read,
     /// so an account added in another application is noticed.
     accounts_stamp: sync::Stamp,
@@ -596,6 +599,7 @@ impl cosmic::Application for AppModel {
             review: None,
             accounts_stamp: sync::accounts_file_stamp(),
             accounts,
+            registry: cosmic_pim_accounts::Registry::load(),
             account_form: None,
             syncing: false,
             sync_status: None,
@@ -828,6 +832,7 @@ impl cosmic::Application for AppModel {
             ContextPage::Accounts => context_drawer::context_drawer(
                 crate::ui::accounts::view(
                     self.accounts.as_ref().map_or(&[], |a| a.accounts()),
+                    &self.registry,
                     self.account_form.as_ref(),
                     self.syncing,
                     self.sync_status.as_deref(),

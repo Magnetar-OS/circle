@@ -203,6 +203,8 @@ server-url = Διεύθυνση διακομιστή
 username = Όνομα χρήστη
 password = Κωδικός πρόσβασης
 app-password-hint = Πολλοί πάροχοι απαιτούν κωδικό ειδικό για εφαρμογή αντί για τον κανονικό σας.
+account-no-contacts = χωρίς ευρετήρια επαφών
+account-via-online-accounts = σύνδεση μέσω του GNOME Online Accounts
 no-accounts-description =
     Προσθέστε έναν λογαριασμό CardDAV για να συγχρονίσετε τις επαφές σας με
     έναν διακομιστή. Οι λογαριασμοί είναι κοινοί με το Slate — ένας
