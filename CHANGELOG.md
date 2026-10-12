@@ -17,6 +17,15 @@ All notable changes to this project are documented here. The format follows
   Slate — appears on the Accounts page within a couple of seconds, without a
   restart, and its contacts are fetched at once.
 
+### Changed
+
+- Built against cosmic-pim 3. A Fastmail, Google or iCloud account made from
+  its provider now finds its address books. They were looked for at the
+  provider's calendar address, where there are none; accounts stored that way
+  are read correctly without being added again. Yahoo, AOL, mailbox.org and
+  Posteo accounts, new in this release, work the same way. An account linked
+  from GNOME Online Accounts is synced with the token Online Accounts keeps.
+
 ### Fixed
 
 - `con ada` in the COSMIC launcher finds Ada. It never had: the launcher
