@@ -204,6 +204,8 @@ username = Όνομα χρήστη
 password = Κωδικός πρόσβασης
 app-password-hint = Πολλοί πάροχοι απαιτούν κωδικό ειδικό για εφαρμογή αντί για τον κανονικό σας.
 account-no-contacts = χωρίς ευρετήρια επαφών
+manage-in-accounts = Διαχείριση στους Λογαριασμούς…
+online-account-kept-elsewhere = Ο λογαριασμός «{ $name }» προέρχεται από το GNOME Online Accounts και η αφαίρεσή του εδώ δεν θα κρατούσε: συνδέεται ξανά από εκεί. Αφαιρέστε τον στο GNOME Online Accounts ή εγκαταστήστε την εφαρμογή Λογαριασμοί για να τον διαχειριστείτε.
 account-via-online-accounts = σύνδεση μέσω του GNOME Online Accounts
 no-accounts-description =
     Προσθέστε έναν λογαριασμό CardDAV για να συγχρονίσετε τις επαφές σας με

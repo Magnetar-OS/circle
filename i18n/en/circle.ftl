@@ -202,6 +202,8 @@ password = Password
 app-password-hint = Many providers require an app-specific password rather than your normal one.
 # An account row's description: its login, then where its contacts come from.
 account-no-contacts = no address books
+manage-in-accounts = Manage in Accounts…
+online-account-kept-elsewhere = “{ $name }” comes from GNOME Online Accounts, and removing it here would not last: it is linked again from there. Remove it in GNOME Online Accounts, or install the Accounts app to manage it.
 account-via-online-accounts = signed in through GNOME Online Accounts
 no-accounts-description =
     Add a CardDAV account to sync your contacts with a server. Accounts are

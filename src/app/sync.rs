@@ -14,6 +14,29 @@ use super::{AccountForm, AppModel, ContextPage, Message, ServerNotAdded};
 use crate::fl;
 
 impl AppModel {
+    /// Opens the Accounts window for the account `id`, or says where it is
+    /// kept when that is not installed.
+    pub(super) fn manage_online_account(&mut self, id: &str) -> Task<Message> {
+        let name = self
+            .accounts
+            .iter()
+            .flat_map(cosmic_pim_accounts::AccountStore::accounts)
+            .find(|account| account.id == id)
+            .map_or_else(|| id.to_owned(), |account| account.display_name.clone());
+        match manage_elsewhere(crate::handoff::ACCOUNTS_WINDOW, &name) {
+            Some(said) => self.toast(said),
+            None => Task::none(),
+        }
+    }
+
+    /// Whether GNOME Online Accounts keeps the account `id`.
+    pub(super) fn is_online_account(&self, id: &str) -> bool {
+        self.accounts
+            .iter()
+            .flat_map(cosmic_pim_accounts::AccountStore::accounts)
+            .any(|account| account.id == id && account.online_account().is_some())
+    }
+
     /// Validates the add-account form, and on a worker stores the account
     /// once the server has taken the login.
     pub(super) fn confirm_account(&mut self) -> Task<Message> {
@@ -250,6 +273,15 @@ pub(super) fn add_account_elsewhere(form: &mut Option<AccountForm>, program: &st
         tracing::info!(%why, "no Accounts window; using the server form");
         *form = Some(AccountForm::default());
     }
+}
+
+/// Opens the Accounts window (`program`) to manage the account called `name`,
+/// which GNOME Online Accounts keeps. Where it cannot be started, what to
+/// say instead: where the account is kept, and why it is not removed here.
+fn manage_elsewhere(program: &str, name: &str) -> Option<String> {
+    let why = crate::handoff::start(crate::handoff::manage_accounts(program)).err()?;
+    tracing::info!(%why, "no Accounts window to manage an online account in");
+    Some(fl!("online-account-kept-elsewhere", name = name))
 }
 
 /// Stores the account the server form describes, once the server at its
@@ -1079,6 +1111,16 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
             password: password.into(),
             ..AccountForm::default()
         }
+    }
+
+    #[test]
+    fn an_online_account_is_managed_in_the_accounts_window_or_said_to_be_kept_there() {
+        assert_eq!(manage_elsewhere("true", "Ada at Google"), None);
+
+        let said = manage_elsewhere("/nonexistent/magnetar-accounts", "Ada at Google")
+            .expect("something to say");
+        assert!(said.contains("GNOME Online Accounts"), "{said}");
+        assert!(said.contains("Ada at Google"), "{said}");
     }
 
     #[test]

@@ -16,6 +16,10 @@ All notable changes to this project are documented here. The format follows
 - An account added in another application — the Accounts window, Envelope,
   Slate — appears on the Accounts page within a couple of seconds, without a
   restart, and its contacts are fetched at once.
+- An account GNOME Online Accounts keeps has a Manage in Accounts button
+  instead of Remove: it opens the Accounts window, where it is removed.
+  Removed here, it was linked again from GNOME Online Accounts. Without the
+  Accounts window installed, Circle says where the account is kept.
 
 ### Changed
 

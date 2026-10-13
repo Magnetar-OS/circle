@@ -402,6 +402,9 @@ pub enum Message {
     AccountUsernameChanged(String),
     AccountPasswordChanged(String),
     AccountRemove(String),
+    /// Opens the Accounts window for an account GNOME Online Accounts keeps,
+    /// which is where it is removed.
+    AccountManageElsewhere(String),
     SyncNow,
     SyncFinished(SyncSummary),
     /// Open the Accounts page — the sync-problem toast's action.
@@ -1132,6 +1135,12 @@ impl AppModel {
             Message::AccountPasswordChanged(value) => {
                 self.with_account_form(|form| form.password = value);
             }
+            // Removed here, an account GNOME Online Accounts keeps comes back
+            // at the next link; it is removed where it is kept.
+            Message::AccountRemove(id) if self.is_online_account(&id) => {
+                return self.manage_online_account(&id);
+            }
+            Message::AccountManageElsewhere(id) => return self.manage_online_account(&id),
             Message::AccountRemove(id) => {
                 if let Some(accounts) = self.accounts.as_mut()
                     && let Err(why) = accounts.remove(&id)
