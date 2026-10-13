@@ -25,6 +25,8 @@ All notable changes to this project are documented here. The format follows
   are read correctly without being added again. Yahoo, AOL, mailbox.org and
   Posteo accounts, new in this release, work the same way. An account linked
   from GNOME Online Accounts is synced with the token Online Accounts keeps.
+- Built against cosmic-pim 3.1.0. A contacts server that refuses the password
+  is reported as refusing it, not as a server that could not be reached.
 
 ### Fixed
 

@@ -24,14 +24,14 @@ xdgen = "0.1"
 # Registry versions: cosmic-pim 3 is on crates.io. A commented [patch]
 # below swaps in the sibling checkout for local work. See slate/Cargo.toml for
 # the same note in full.
-cosmic-pim-core = "3"
-cosmic-pim-accounts = "3"
+cosmic-pim-core = "3.1"
+cosmic-pim-accounts = "3.1"
 # Default features off: the one default is `mail` (IMAP/SMTP through
 # cosmic-pim-mail, with OpenPGP and rsa), which a contacts app never runs.
-cosmic-pim-sync = { version = "3", default-features = false }
+cosmic-pim-sync = { version = "3.1", default-features = false }
 # Which kind of collection a sync report is about (`Flavor`), so a failed
 # calendar is left to Slate; also what the tests read the push queue through.
-cosmic-pim-caldav = "3"
+cosmic-pim-caldav = "3.1"
 
 # --- COSMIC / UI ---
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
