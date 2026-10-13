@@ -10,18 +10,22 @@ use cosmic::widget;
 use cosmic_pim_core::store::StoreError;
 use cosmic_pim_core::store::contacts::ContactStore;
 
-use super::{AccountForm, AppModel, ContextPage, Message};
+use super::{AccountForm, AppModel, ContextPage, Message, ServerNotAdded};
 use crate::fl;
 
 impl AppModel {
-    /// Validates the add-account form and stores the account.
+    /// Validates the add-account form, and on a worker stores the account
+    /// once the server has taken the login.
     pub(super) fn confirm_account(&mut self) -> Task<Message> {
         let Some(form) = self.account_form.clone() else {
             return Task::none();
         };
-        let Some(accounts) = self.accounts.as_mut() else {
+        if form.adding {
+            return Task::none();
+        }
+        if self.accounts.is_none() {
             return self.toast(fl!("error-no-account-store"));
-        };
+        }
 
         let url = form.url.trim();
         // Refuse plaintext up front rather than after the password has been
@@ -36,27 +40,18 @@ impl AppModel {
             return Task::none();
         }
 
-        let display_name = if form.display_name.trim().is_empty() {
-            form.username.trim().to_owned()
-        } else {
-            form.display_name.trim().to_owned()
-        };
-
-        let account = cosmic_pim_accounts::Account::new(&display_name, url, form.username.trim());
-
-        match accounts.add(account, &form.password) {
-            Ok(()) => {
-                self.account_form = None;
-                // Sync immediately: the user just told us where their
-                // contacts are, and waiting for a timer to act on that feels
-                // broken.
-                self.sync_now()
-            }
-            Err(why) => {
-                self.with_account_form(|f| f.error = Some(why.to_string()));
-                Task::none()
-            }
-        }
+        self.with_account_form(|f| f.adding = true);
+        let registry = self.registry.clone();
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let mut store = cosmic_pim_accounts::AccountStore::open_default()
+                    .map_err(|why| ServerNotAdded::Failed(why.to_string()))?;
+                add_server(&mut store, &registry, &form).map(drop)
+            })
+            .await
+            .unwrap_or_else(|why| Err(ServerNotAdded::Failed(why.to_string())));
+            Message::AccountAddFinished(result)
+        })
     }
 
     /// The toast for a pass that left something to look at, raised only
@@ -254,6 +249,67 @@ pub(super) fn add_account_elsewhere(form: &mut Option<AccountForm>, program: &st
     if let Err(why) = crate::handoff::start(crate::handoff::add_account(program)) {
         tracing::info!(%why, "no Accounts window; using the server form");
         *form = Some(AccountForm::default());
+    }
+}
+
+/// Stores the account the server form describes, once the server at its
+/// address has taken the login: `setup::add_with_dav_url` finds the principal
+/// and the calendar home — or, on a contacts-only server, the address book
+/// home — with the password before anything is written. A password stored
+/// untried failed later as a sync error, far from the form. Blocking.
+///
+/// Returns the new account's id.
+fn add_server(
+    store: &mut cosmic_pim_accounts::AccountStore,
+    registry: &cosmic_pim_accounts::Registry,
+    form: &AccountForm,
+) -> Result<String, ServerNotAdded> {
+    use cosmic_pim_sync::setup::{self, SetupError};
+
+    let login = form.username.trim();
+    let name = match form.display_name.trim() {
+        "" => login,
+        name => name,
+    };
+    // A plan starts from an email address, and this form has a login and a
+    // server instead. The plan's address is only a fallback for the name and
+    // the login, and both are passed, so it is never what is stored: the
+    // login when it is an address, else the login at a reserved domain.
+    let plan = setup::plan(registry, login, false)
+        .or_else(|| setup::plan(registry, &format!("{login}@server.invalid"), false))
+        .ok_or_else(|| ServerNotAdded::Failed(fl!("error-no-username")))?;
+
+    setup::add_with_dav_url(store, &plan, name, &form.url, login, &form.password).map_err(|why| {
+        match why {
+            SetupError::Rejected(_) => ServerNotAdded::Refused,
+            why => ServerNotAdded::Failed(why.to_string()),
+        }
+    })
+}
+
+/// Takes the server's answer into the form: closed when the account was
+/// stored, else kept as typed with what went wrong. Whether it was stored.
+pub(super) fn server_added(
+    form: &mut Option<AccountForm>,
+    result: Result<(), ServerNotAdded>,
+) -> bool {
+    match result {
+        Ok(()) => {
+            *form = None;
+            true
+        }
+        Err(why) => {
+            if let Some(form) = form.as_mut() {
+                form.adding = false;
+                form.error = Some(match why {
+                    ServerNotAdded::Refused => fl!("error-server-refused"),
+                    ServerNotAdded::Failed(reason) => {
+                        fl!("error-server-not-added", reason = reason)
+                    }
+                });
+            }
+            false
+        }
     }
 }
 
@@ -934,6 +990,175 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         slate.remove(&id).unwrap();
         reload_account_store(&mut circle).unwrap();
         assert!(circle.accounts().is_empty());
+    }
+
+    /// A WebDAV server on 127.0.0.1 that knows `ada` by `password`, with a
+    /// calendar home when `calendars` and an address book home always. One
+    /// request per connection.
+    fn dav_server(password: &'static str, calendars: bool) -> String {
+        use base64::Engine as _;
+        use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let expected = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!("ada:{password}"))
+        );
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { return };
+                let mut out = stream.try_clone().expect("clone");
+                let mut reader = BufReader::new(stream);
+                let mut request = String::new();
+                if reader.read_line(&mut request).is_err() {
+                    continue;
+                }
+                let path = request.split(' ').nth(1).unwrap_or("/").to_owned();
+                let (mut length, mut authorized) = (0, false);
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap_or(0);
+                        } else if name.eq_ignore_ascii_case("authorization") {
+                            authorized = value.trim() == expected;
+                        }
+                    }
+                    line.clear();
+                }
+                let mut body = vec![0; length];
+                let _ = reader.read_exact(&mut body);
+                let body = String::from_utf8_lossy(&body);
+
+                let _ = if authorized {
+                    let prop = if body.contains("current-user-principal") {
+                        "<D:current-user-principal><D:href>/principal/</D:href></D:current-user-principal>"
+                    } else if body.contains("calendar-home-set") && calendars {
+                        "<C:calendar-home-set><D:href>/calendars/</D:href></C:calendar-home-set>"
+                    } else if body.contains("addressbook-home-set") {
+                        "<C:addressbook-home-set><D:href>/contacts/</D:href></C:addressbook-home-set>"
+                    } else {
+                        ""
+                    };
+                    let xml = format!(
+                        "<?xml version=\"1.0\"?><D:multistatus xmlns:D=\"DAV:\" \
+                         xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><D:response><D:href>{path}</D:href>\
+                         <D:propstat><D:prop>{prop}</D:prop><D:status>HTTP/1.1 200 OK</D:status>\
+                         </D:propstat></D:response></D:multistatus>"
+                    );
+                    write!(
+                        out,
+                        "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml; charset=utf-8\r\n\
+                         Content-Length: {}\r\nConnection: close\r\n\r\n{xml}",
+                        xml.len()
+                    )
+                } else {
+                    write!(
+                        out,
+                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"dav\"\r\n\
+                         Content-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                };
+            }
+        });
+        format!("http://127.0.0.1:{port}/")
+    }
+
+    fn private_store(dir: &Path) -> cosmic_pim_accounts::AccountStore {
+        let secrets = cosmic_pim_accounts::SecretStore::open_envelope_only("circle-test", dir);
+        cosmic_pim_accounts::AccountStore::open(&dir.join("accounts.toml"), secrets)
+            .expect("the store")
+    }
+
+    fn server_form(url: &str, password: &str) -> AccountForm {
+        AccountForm {
+            display_name: "Home".into(),
+            url: url.into(),
+            username: "ada".into(),
+            password: password.into(),
+            ..AccountForm::default()
+        }
+    }
+
+    #[test]
+    fn a_server_that_takes_the_login_is_stored() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = private_store(dir.path());
+        let registry = cosmic_pim_accounts::Registry::load_from(dir.path());
+        let url = dav_server("right", true);
+
+        let id = add_server(&mut store, &registry, &server_form(&url, "right"))
+            .expect("the server took the login");
+
+        let account = store.get(&id).expect("stored");
+        assert_eq!(account.display_name, "Home");
+        assert_eq!(account.url, url);
+        assert_eq!(account.username, "ada", "the login, not a made-up address");
+        assert_eq!(account.provider, None);
+        assert_eq!(store.password(&id).expect("read").as_deref(), Some("right"));
+    }
+
+    #[test]
+    fn a_contacts_only_server_is_stored_under_the_login_as_its_name() {
+        // A CardDAV server with no calendars is the whole point of Circle's
+        // form.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = private_store(dir.path());
+        let registry = cosmic_pim_accounts::Registry::load_from(dir.path());
+        let form = AccountForm {
+            display_name: String::new(),
+            ..server_form(&dav_server("right", false), "right")
+        };
+
+        let id = add_server(&mut store, &registry, &form).expect("accepted");
+
+        assert_eq!(store.get(&id).expect("stored").display_name, "ada");
+    }
+
+    #[test]
+    fn a_server_that_refuses_the_password_stores_nothing() {
+        // It used to be stored as typed, and failed later as a sync error.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = private_store(dir.path());
+        let registry = cosmic_pim_accounts::Registry::load_from(dir.path());
+        let url = dav_server("right", false);
+
+        let refused = add_server(&mut store, &registry, &server_form(&url, "wrong"));
+
+        assert_eq!(refused, Err(ServerNotAdded::Refused));
+        assert_eq!(store.accounts(), []);
+    }
+
+    #[test]
+    fn a_refused_login_keeps_the_form_open_and_says_so() {
+        let mut form = Some(AccountForm {
+            adding: true,
+            ..server_form("https://dav.example/", "wrong")
+        });
+
+        assert!(!server_added(&mut form, Err(ServerNotAdded::Refused)));
+
+        let open = form.as_ref().expect("the form stays open");
+        assert!(!open.adding);
+        assert_eq!(open.password, "wrong", "what was typed is kept to correct");
+        assert_eq!(
+            open.error.as_deref(),
+            Some(fl!("error-server-refused").as_str())
+        );
+
+        assert!(!server_added(
+            &mut form,
+            Err(ServerNotAdded::Failed("connection refused".into()))
+        ));
+        let error = form
+            .as_ref()
+            .and_then(|f| f.error.as_deref())
+            .unwrap_or_default();
+        assert!(error.contains("connection refused"), "{error}");
+
+        assert!(server_added(&mut form, Ok(())));
+        assert!(form.is_none(), "an added account closes the form");
     }
 
     #[test]

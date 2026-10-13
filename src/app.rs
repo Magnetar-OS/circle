@@ -336,7 +336,19 @@ pub struct AccountForm {
     pub url: String,
     pub username: String,
     pub password: String,
+    /// The server is being asked whether it takes the login.
+    pub adding: bool,
     pub error: Option<String>,
+}
+
+/// Why Add a server stored nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServerNotAdded {
+    /// The server turned the username and password down.
+    Refused,
+    /// Anything else, in words: a server that could not be reached, an
+    /// address with no address books or calendars behind it.
+    Failed(String),
 }
 
 #[derive(Clone, Debug)]
@@ -383,6 +395,8 @@ pub enum Message {
     AccountAddStart,
     AccountAddCancel,
     AccountAddConfirm,
+    /// The server form's account is stored, or why not.
+    AccountAddFinished(Result<(), ServerNotAdded>),
     AccountNameChanged(String),
     AccountUrlChanged(String),
     AccountUsernameChanged(String),
@@ -1099,6 +1113,13 @@ impl AppModel {
             Message::AccountAddStart => self.account_form = Some(AccountForm::default()),
             Message::AccountAddCancel => self.account_form = None,
             Message::AccountAddConfirm => return self.confirm_account(),
+            Message::AccountAddFinished(result) => {
+                if sync::server_added(&mut self.account_form, result) {
+                    // Read back the account the worker stored, and sync it
+                    // at once: the user just said where their contacts are.
+                    return self.accounts_file_changed();
+                }
+            }
             Message::AccountNameChanged(value) => {
                 self.with_account_form(|form| form.display_name = value);
             }

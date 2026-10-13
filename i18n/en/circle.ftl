@@ -233,6 +233,10 @@ sync-minutes = Every { $minutes ->
 error-no-account-store = Account storage is unavailable, so accounts cannot be saved.
 error-url-scheme = The server address must start with https://
 error-url-insecure = Refusing to send your password over an unencrypted connection. Use https://
+error-no-username = Type the username you sign in to the server with.
+error-server-refused = The server did not accept that username and password. Nothing was saved.
+error-server-not-added = Not added: { $reason }. Nothing was saved.
+adding-server = Signing in…
 
 ## Sync conflicts
 

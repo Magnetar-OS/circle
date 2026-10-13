@@ -30,6 +30,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Add a server signs in to the server before it saves the account. A wrong
+  password used to be saved as typed and fail later as a sync error; now the
+  form stays open and says the server did not accept it.
 - Each account on the Accounts page says where its contacts come from. An
   account made from a provider, or linked from GNOME Online Accounts, showed
   only its login followed by a dot; one stored by an earlier version showed

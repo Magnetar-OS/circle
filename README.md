@@ -76,7 +76,8 @@ Reading, searching, creating, editing, and deleting contacts all work.
   (`magnetar-accounts --for=contacts`), which takes an address and works out
   the rest; *Add a server* is Circle's own form — a URL, username, and
   password — and is what *Add account* opens where the Accounts window is not
-  installed.
+  installed. It signs in to the server with the password before it saves
+  anything.
   An account added anywhere else shows up within a couple of seconds and is
   synced at once.
   Sync runs on demand
