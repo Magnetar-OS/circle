@@ -19,7 +19,7 @@ use cosmic::widget;
 use crate::app::{AccountForm, Message};
 use crate::conflicts::{ConflictRow, Resolution};
 use crate::fl;
-use cosmic_pim_accounts::{Account, Registry};
+use cosmic_pim_accounts::{Account, DavService, Registry};
 use cosmic_pim_core::merge::{Overlap, Side};
 
 /// One row per account, plus the add form or the button that opens it, and
@@ -113,39 +113,21 @@ pub fn view<'a>(
 /// An account made from a provider carries no URL of its own (cosmic-pim 3
 /// reads both of the provider's addresses from its manifest), and neither
 /// does one linked from Online Accounts, so the row cannot print
-/// `account.url` and has to ask where the sync pass will look.
+/// `account.url` and asks where the sync pass will look:
+/// [`Account::service_url`], the engine's own rule, so the two cannot
+/// disagree. `None` there is an account with no address books — a mail-only
+/// account, or a provider with no CardDAV, such as Microsoft.
 fn description(account: &Account, registry: &Registry) -> String {
     let mut parts = vec![account.username.clone()];
-    parts.push(contacts_address(account, registry).unwrap_or_else(|| fl!("account-no-contacts")));
+    parts.push(
+        account
+            .service_url(registry, DavService::Contacts)
+            .unwrap_or_else(|| fl!("account-no-contacts")),
+    );
     if account.online_account().is_some() {
         parts.push(fl!("account-via-online-accounts"));
     }
     parts.join(" · ")
-}
-
-/// The CardDAV address the sync pass reads this account's address books
-/// from, or `None` when it has none — a mail-only account, or a provider
-/// with no CardDAV, such as Microsoft.
-///
-/// Whether there is one is the sync engine's answer
-/// ([`cosmic_pim_sync::setup::services_of`]). Which one is the engine's rule
-/// too, restated because the engine keeps it private: the account's own URL
-/// wins, except when it is exactly the provider's calendar address — what
-/// cosmic-pim 2 stored as a provider account's URL — and otherwise the
-/// provider's contacts address.
-fn contacts_address(account: &Account, registry: &Registry) -> Option<String> {
-    if !cosmic_pim_sync::setup::services_of(account, registry).contacts {
-        return None;
-    }
-    let provider = account.provider.as_deref().and_then(|id| registry.get(id));
-    let own = account.url.trim();
-    let inherited = provider
-        .and_then(|provider| provider.calendar_url(&account.username))
-        .is_some_and(|calendar| calendar == own);
-    if !own.is_empty() && !inherited {
-        return Some(own.to_owned());
-    }
-    provider.and_then(|provider| provider.contacts_url(&account.username))
 }
 
 /// Unresolved sync conflicts: who each side says the card is, and the ways
@@ -380,10 +362,6 @@ mod tests {
 
         let contacts = fastmail.contacts_url("ada@fastmail.com").unwrap();
         assert_eq!(
-            contacts_address(&account, &registry),
-            Some(contacts.clone())
-        );
-        assert_eq!(
             description(&account, &registry),
             format!("ada@fastmail.com · {contacts}")
         );
@@ -399,9 +377,10 @@ mod tests {
         let mut account = fastmail.account_for("ada@fastmail.com");
         account.url = fastmail.calendar_url("ada@fastmail.com").unwrap();
 
+        let contacts = fastmail.contacts_url("ada@fastmail.com").unwrap();
         assert_eq!(
-            contacts_address(&account, &registry),
-            fastmail.contacts_url("ada@fastmail.com")
+            description(&account, &registry),
+            format!("ada@fastmail.com · {contacts}")
         );
     }
 
@@ -454,7 +433,6 @@ mod tests {
             .unwrap();
 
         for account in [&microsoft, &gmail] {
-            assert_eq!(contacts_address(account, &registry), None);
             assert!(
                 description(account, &registry).contains(&fl!("account-no-contacts")),
                 "{}",
