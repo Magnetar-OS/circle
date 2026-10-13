@@ -23,6 +23,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Rebuilt against the current COSMIC libraries (libcosmic `a6ac45c`).
 - Built against cosmic-pim 3. A Fastmail, Google or iCloud account made from
   its provider now finds its address books. They were looked for at the
   provider's calendar address, where there are none; accounts stored that way
