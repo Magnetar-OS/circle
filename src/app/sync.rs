@@ -257,39 +257,6 @@ pub(super) fn add_account_elsewhere(form: &mut Option<AccountForm>, program: &st
     }
 }
 
-/// How often to look whether the shared account list changed. A `stat`, so
-/// cheap enough to do this often: an account added in the Accounts window
-/// should appear here before the person has finished switching windows.
-pub(super) const ACCOUNTS_FILE_CHECK: std::time::Duration = std::time::Duration::from_secs(2);
-
-/// What identifies one version of a file on disk: its size and its
-/// modification time. `None` when there is no file.
-pub(super) type Stamp = Option<(u64, std::time::SystemTime)>;
-
-/// The account list's stamp, as it is on disk now.
-pub(super) fn accounts_file_stamp() -> Stamp {
-    file_stamp(&cosmic_pim_accounts::account::default_config_path())
-}
-
-fn file_stamp(path: &Path) -> Stamp {
-    let metadata = std::fs::metadata(path).ok()?;
-    Some((metadata.len(), metadata.modified().ok()?))
-}
-
-/// Whether the file at `path` is a different version from the one `last`
-/// names, which is brought up to date.
-///
-/// However many times the file was written since the last look, that is one
-/// change: the list is read once per look, not once per write.
-pub(super) fn stamp_changed(last: &mut Stamp, path: &Path) -> bool {
-    let now = file_stamp(path);
-    if now == *last {
-        return false;
-    }
-    *last = now;
-    true
-}
-
 /// Whether `accounts` holds one whose id is not among `known`.
 fn has_new_account(known: &[String], accounts: &[cosmic_pim_accounts::Account]) -> bool {
     accounts.iter().any(|account| !known.contains(&account.id))
@@ -967,52 +934,6 @@ BEGIN:VCARD\r\nVERSION:3.0\r\nUID:bob\r\nFN:Bob\r\nEND:VCARD\r\n";
         slate.remove(&id).unwrap();
         reload_account_store(&mut circle).unwrap();
         assert!(circle.accounts().is_empty());
-    }
-
-    #[test]
-    fn a_change_to_the_account_list_changes_its_stamp() {
-        // The stamp is how an account added in the Accounts window reaches
-        // the Accounts page without a restart.
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("accounts.toml");
-        assert_eq!(file_stamp(&path), None);
-
-        std::fs::write(&path, "").unwrap();
-        let empty = file_stamp(&path);
-        std::fs::write(&path, "[[account]]\nid = \"a\"\n").unwrap();
-
-        assert!(empty.is_some());
-        assert_ne!(file_stamp(&path), empty);
-    }
-
-    #[test]
-    fn the_account_list_is_read_once_per_look_however_often_it_was_written() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("accounts.toml");
-        let mut last = file_stamp(&path);
-
-        // Nothing there, nothing written: nothing to read.
-        assert!(!stamp_changed(&mut last, &path));
-
-        // The Accounts window adding an account is several writes: the
-        // account, then what discovery found for it.
-        std::fs::write(&path, "[[account]]\nid = \"a\"\n").unwrap();
-        std::fs::write(
-            &path,
-            "[[account]]\nid = \"a\"\nurl = \"https://dav.example\"\n",
-        )
-        .unwrap();
-        assert!(stamp_changed(&mut last, &path));
-        assert!(
-            !stamp_changed(&mut last, &path),
-            "one change was read twice"
-        );
-        assert!(!stamp_changed(&mut last, &path));
-
-        // Every account removed, and the file with them.
-        std::fs::remove_file(&path).unwrap();
-        assert!(stamp_changed(&mut last, &path));
-        assert!(!stamp_changed(&mut last, &path));
     }
 
     #[test]

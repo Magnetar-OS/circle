@@ -220,7 +220,7 @@ pub struct AppModel {
     registry: cosmic_pim_accounts::Registry,
     /// The account list's size and modification time when it was last read,
     /// so an account added in another application is noticed.
-    accounts_stamp: sync::Stamp,
+    accounts_stamp: cosmic_pim_accounts::FileStamp,
     /// The in-progress "add an account" form on the Accounts page.
     account_form: Option<AccountForm>,
     /// A sync pass is in flight. One at a time: two passes racing on the same
@@ -597,7 +597,7 @@ impl cosmic::Application for AppModel {
             can_map: false,
             folded: HashMap::new(),
             review: None,
-            accounts_stamp: sync::accounts_file_stamp(),
+            accounts_stamp: cosmic_pim_accounts::FileStamp::accounts_file(),
             accounts,
             registry: cosmic_pim_accounts::Registry::load(),
             account_form: None,
@@ -862,7 +862,7 @@ impl cosmic::Application for AppModel {
             // Accounts are the suite's: one added in the Accounts window, or
             // in Envelope or Slate, appears here without a restart. A `stat`
             // every two seconds.
-            cosmic::iced::time::every(sync::ACCOUNTS_FILE_CHECK)
+            cosmic::iced::time::every(cosmic_pim_accounts::account::ACCOUNTS_FILE_CHECK_INTERVAL)
                 .map(|_| Message::AccountsFileCheck),
             // Only `Ignored` presses: a focused text input has already claimed
             // anything it wants, so the editor keeps its own keys. The physical
@@ -1092,7 +1092,7 @@ impl AppModel {
             }
             Message::AccountsFileCheck => {
                 let path = cosmic_pim_accounts::account::default_config_path();
-                if sync::stamp_changed(&mut self.accounts_stamp, &path) {
+                if self.accounts_stamp.changed(&path) {
                     return self.accounts_file_changed();
                 }
             }
