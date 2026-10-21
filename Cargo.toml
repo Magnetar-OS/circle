@@ -111,7 +111,7 @@ usvg = "0.45"
 # reaches that line from whatever a CardDAV server chose to store.
 shlex = "1.3"
 # The WebDAV stand-in checks the Basic login it is sent. Already in the graph.
-base64 = "0.22"
+base64 = "0.23"
 
 [[bin]]
 name = "circle"
