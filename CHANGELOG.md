@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rebuilt against the current COSMIC libraries (libcosmic `95236a9`).
+- A contact opened from the launcher, and a mail started from it, run as
+  their own unit of the user's systemd session, through libcosmic's new
+  launcher.
+
 ## [1.5.0] - 2026-10-21
 
 ### Changed

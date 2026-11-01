@@ -70,6 +70,11 @@ sha2 = "0.11"
 # directly here for the same reason Slate does — the alternative is shelling
 # out to a CLI that may not be installed alongside the daemon.
 zbus = "5.19"
+# The launcher plugin starts Circle, and the mail handler, as units of the
+# user's systemd session rather than as children of pop-launcher, which reaps
+# its plugins. libcosmic's launcher crate, from the same repository and so the
+# same locked revision.
+cosmic-launch = { git = "https://github.com/pop-os/libcosmic.git" }
 # CSV import. RFC 4180 quoting — embedded commas, quotes, and newlines — is
 # exactly the kind of parser that looks trivial and is not; the boring crate
 # is the right answer.
@@ -87,9 +92,8 @@ features = [
     "wgpu",
     # Native file dialogs, for .vcf import and export
     "xdg-portal",
-    # `spawn_desktop_exec` with a systemd transient scope, so a window the
-    # launcher plugin opens belongs to the session rather than to pop-launcher.
-    "desktop-systemd-scope",
+    # Desktop-entry lookup, to find whether a maps application is installed.
+    "desktop",
 ]
 
 [dev-dependencies]
@@ -106,10 +110,11 @@ pop-launcher = "1.2.7"
 # that actually renders it rather than by inspecting the text it was built
 # from. Already in the graph through libcosmic.
 usvg = "0.45"
-# The launcher's exec line is parsed by shlex before it is spawned, so the
-# quoting is checked with shlex rather than by reading it. A contact's name
-# reaches that line from whatever a CardDAV server chose to store.
-shlex = "1.3"
+# The launcher's exec line is split by shlex before it is spawned — the shlex 2
+# that libcosmic's cosmic-launch splits it with — so the quoting is checked
+# with shlex rather than by reading it. A contact's name reaches that line
+# from whatever a CardDAV server chose to store.
+shlex = "2.0"
 # The WebDAV stand-in checks the Basic login it is sent. Already in the graph.
 base64 = "0.23"
 

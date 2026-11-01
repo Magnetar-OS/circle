@@ -178,20 +178,11 @@ impl Plugin {
         if let Some(contact) = self.results.get(id) {
             // Searching for the label is the hand-over: Circle raises its
             // window (or starts) and the query narrows the list to this
-            // person. shlex parses the exec line, so the label is
-            // single-quoted the way a shell would want it. The canonical
-            // launch path underneath — double fork + setsid + a systemd
-            // transient scope — so the window is the session's, not this
-            // plugin's, which pop-launcher owns and reaps. No activation
-            // token: a plugin owns no surface to bind one to.
+            // person. No activation token: a plugin owns no surface to bind
+            // one to.
             let exec = search_exec(&contact.label());
             match self.runtime.as_ref() {
-                Some(runtime) => runtime.block_on(cosmic::desktop::spawn_desktop_exec(
-                    exec,
-                    std::iter::empty::<(&str, &str)>(),
-                    Some(APP_ID),
-                    false,
-                )),
+                Some(runtime) => runtime.block_on(spawn(APP_ID, exec)),
                 None => tracing::warn!("no runtime; cannot launch the app"),
             }
         }
@@ -243,12 +234,7 @@ impl Plugin {
                 if let Some(runtime) = self.runtime.as_ref() {
                     // Through the desktop's handler, so it reaches whatever the
                     // user's mail app is — Envelope once it registers mailto:.
-                    runtime.block_on(cosmic::desktop::spawn_desktop_exec(
-                        compose_exec(email),
-                        std::iter::empty::<(&str, &str)>(),
-                        None,
-                        false,
-                    ));
+                    runtime.block_on(spawn("xdg-open", compose_exec(email)));
                 }
             }
             None => {}
@@ -318,22 +304,59 @@ fn matching(
 /// path to import, so a contact named `' /tmp/evil.vcf '` would make the
 /// launcher import a file nobody asked for.
 ///
-/// POSIX single-quoting: everything inside `'…'` is literal, and the only
-/// character that needs handling is the quote itself, closed and reopened
-/// around an escaped one. Checked against `shlex`, which is what actually
-/// parses this, rather than by reading it.
+/// The line is an `Exec` line, read in two passes. It is split with shell
+/// rules, so it is POSIX single-quoted: everything inside `'…'` is literal,
+/// and the only character that needs handling is the quote itself, closed and
+/// reopened around an escaped one. Its field codes are then expanded, so every
+/// `%` is doubled — `%%` is a literal `%`, and a `%` before anything else is
+/// a code, expanded or dropped: "50% Off" would search for "50Off". Checked
+/// against `shlex`, which is what actually splits this, rather than by
+/// reading it.
 fn search_exec(label: &str) -> String {
-    let quoted = label.replace('\'', "'\\''");
-    format!("circle '--search={quoted}'")
+    format!("circle '--search={}'", exec_escape(label))
 }
 
 /// The command line that starts a mail to `email`.
 ///
 /// Quoted the way [`search_exec`] quotes a name, for the same reason: the
-/// address is other people's data on its way into a line shlex splits.
+/// address is other people's data on its way into an `Exec` line.
 fn compose_exec(email: &str) -> String {
-    let quoted = email.replace('\'', "'\\''");
-    format!("xdg-open 'mailto:{quoted}'")
+    format!("xdg-open 'mailto:{}'", exec_escape(email))
+}
+
+/// `value` made safe inside a single-quoted argument of an `Exec` line.
+fn exec_escape(value: &str) -> String {
+    value.replace('\'', "'\\''").replace('%', "%%")
+}
+
+/// Start `exec` through libcosmic's launcher, as `app_id`.
+///
+/// The canonical launch path: the window is started as its own
+/// `app-<id>@<random>.service` unit of the user's systemd session, so it is
+/// the session's and not this plugin's, which pop-launcher owns and reaps.
+/// Failures are logged; the launcher has already closed.
+async fn spawn(app_id: &str, exec: String) {
+    let session = match zbus::Connection::session().await {
+        Ok(session) => session,
+        Err(why) => {
+            tracing::error!(%why, "no session bus to launch on");
+            return;
+        }
+    };
+    let executable = cosmic_launch::CustomExecutable::new(app_id.to_owned(), exec);
+    if let Err(why) = cosmic_launch::spawn(
+        &session,
+        &executable,
+        None,
+        &[],
+        None,
+        Vec::new(),
+        &[] as &[String],
+    )
+    .await
+    {
+        tracing::error!(%why, app_id, "failed to launch");
+    }
 }
 
 /// One search result, in the shape pop-launcher deserialises.
@@ -582,8 +605,33 @@ mod tests {
     /// argument injection, and Circle treats a bare argument as a `.vcf` path
     /// to import, so it is a file-read primitive rather than a mangled query.
     fn split(label: &str) -> Vec<String> {
-        let exec = search_exec(label);
-        shlex::split(&exec).unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"))
+        read(&search_exec(label))
+    }
+
+    /// An exec line as the launcher reads it: split by `shlex`, then each
+    /// argument's field codes expanded. `%%` is a literal `%`; any other `%x`
+    /// is a code the launcher expands or drops, so data must never produce
+    /// one — the helper refuses rather than guess what it would become.
+    fn read(exec: &str) -> Vec<String> {
+        let args = shlex::split(exec)
+            .unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"));
+        args.iter()
+            .map(|arg| {
+                let mut out = String::new();
+                let mut chars = arg.chars();
+                while let Some(c) = chars.next() {
+                    if c != '%' {
+                        out.push(c);
+                        continue;
+                    }
+                    match chars.next() {
+                        Some('%') => out.push('%'),
+                        code => panic!("field code %{code:?} in {exec}"),
+                    }
+                }
+                out
+            })
+            .collect()
     }
 
     /// "Send mail" builds an exec line from an address, which is other
@@ -597,10 +645,10 @@ mod tests {
             "\"ada lovelace\"@example.org",
             "o'malley@example.ie",
             "x@y.z /tmp/evil.desktop",
+            "100%real@example.org",
         ] {
             let exec = compose_exec(address);
-            let args = shlex::split(&exec)
-                .unwrap_or_else(|| panic!("shlex cannot parse this exec line: {exec}"));
+            let args = read(&exec);
             assert_eq!(
                 args,
                 ["xdg-open".to_owned(), format!("mailto:{address}")],
@@ -612,6 +660,14 @@ mod tests {
     #[test]
     fn an_ordinary_name_becomes_one_search_argument() {
         assert_eq!(split("Ada Lovelace"), ["circle", "--search=Ada Lovelace"]);
+    }
+
+    /// The launcher expands `Exec` field codes, so a `%` in a name would be
+    /// read as one: "50% Off" searched for "50Off", and `%c` would become
+    /// the application's name.
+    #[test]
+    fn a_percent_sign_in_a_name_is_searched_for_as_written() {
+        assert_eq!(split("50% Off %c"), ["circle", "--search=50% Off %c"]);
     }
 
     /// The apostrophe is the character the quoting exists for, and it is in
