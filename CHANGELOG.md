@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-01
+
 ### Changed
 
 - An empty address book shows a centred empty state with New contact and
@@ -483,7 +485,8 @@ All notable changes to this project are documented here. The format follows
   buttons in the editor, and the back button in the narrow layout — now has a
   tooltip. An icon alone is not a name.
 
-[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/Magnetar-OS/circle/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/Magnetar-OS/circle/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/Magnetar-OS/circle/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Magnetar-OS/circle/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/Magnetar-OS/circle/compare/v1.4.0...v1.5.0
