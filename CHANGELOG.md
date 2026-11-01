@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built on cosmic-pim 4 (rusqlite 0.41).
+
 ## [1.6.0] - 2026-11-01
 
 ### Changed
