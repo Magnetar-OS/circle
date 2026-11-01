@@ -5,6 +5,7 @@
 use cosmic::iced::Length;
 use cosmic::prelude::*;
 use cosmic::widget;
+use cosmic_ext_widgets::search_field;
 
 use super::{AppModel, ContactKey, Message, Review, search_id};
 use crate::fl;
@@ -24,17 +25,15 @@ impl AppModel {
 
         let collapsed = self.is_collapsed();
 
-        let select_toggle = widget::tooltip(
-            widget::button::icon(crate::ui::icon("object-select-symbolic"))
-                .class(if self.selecting {
-                    cosmic::theme::Button::Suggested
-                } else {
-                    cosmic::theme::Button::Icon
-                })
-                .on_press(Message::ToggleSelecting),
-            widget::text::body(fl!("select")),
-            widget::tooltip::Position::Bottom,
-        );
+        // Named in words: a check mark beside a search field read as
+        // "confirm the search", not "pick several contacts".
+        let select_toggle = widget::button::text(fl!("select"))
+            .class(if self.selecting {
+                cosmic::theme::Button::Suggested
+            } else {
+                cosmic::theme::Button::Text
+            })
+            .on_press(Message::ToggleSelecting);
 
         let mut list_pane = widget::column::with_capacity(3)
             .spacing(spacing.space_xs)
@@ -44,15 +43,20 @@ impl AppModel {
                     .align_y(cosmic::iced::Alignment::Center)
                     .spacing(spacing.space_xxs)
                     .push(
-                        widget::search_input(fl!("search-contacts"), &self.query)
-                            .id(search_id())
-                            .on_input(Message::QueryChanged)
-                            .on_clear(Message::QueryChanged(String::new()))
-                            // Enter lands on the first match, so
-                            // type-then-Enter reaches a person with no mouse.
-                            .on_submit(|_| Message::SelectFirst),
+                        search_field(
+                            fl!("search-contacts"),
+                            &self.query,
+                            Message::QueryChanged(String::new()),
+                        )
+                        .id(search_id())
+                        .on_input(Message::QueryChanged)
+                        // Enter lands on the first match, so
+                        // type-then-Enter reaches a person with no mouse.
+                        .on_submit(|_| Message::SelectFirst),
                     )
-                    .push(select_toggle),
+                    .push_maybe(
+                        (!self.contacts.is_empty() || self.selecting).then_some(select_toggle),
+                    ),
             )
             .push(crate::ui::list::list(
                 &self.contacts,
@@ -120,11 +124,16 @@ impl AppModel {
                         detail
                     }
                 }
+                // With no rows there is nothing to select, and the list's own
+                // empty state says what to do; asking for a selection beside
+                // it would contradict it.
+                None if self.contacts.is_empty() => widget::Space::new().into(),
                 None => widget::container(
                     widget::text::body(fl!("no-selection"))
                         .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
                 )
                 .padding(spacing.space_m)
+                .center(Length::Fill)
                 .into(),
             }
         };

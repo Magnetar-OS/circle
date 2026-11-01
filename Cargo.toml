@@ -80,6 +80,10 @@ cosmic-launch = { git = "https://github.com/pop-os/libcosmic.git" }
 # is the right answer.
 csv = "1.4"
 
+# `search_field`: libcosmic's search field with a clear button only while
+# there is text. Consumed by tag; it unifies with this crate's own libcosmic.
+cosmic-ext-widgets = { git = "https://github.com/Magnetar-OS/cosmic-ext-widgets.git", tag = "v1.3.0" }
+
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
 features = [

@@ -28,7 +28,7 @@ contacts-count = { $count } { $count ->
 ## Η λίστα
 
 search-contacts = Αναζήτηση επαφών…
-no-contacts = Δεν υπάρχουν επαφές ακόμη.
+no-contacts = Δεν υπάρχουν επαφές ακόμη
 no-contacts-description = Προσθέστε έναν λογαριασμό CardDAV για συγχρονισμό, ή δημιουργήστε μια επαφή.
 no-search-results = Καμία επαφή δεν ταιριάζει με «{ $query }».
 no-selection = Επιλέξτε μια επαφή για να δείτε τα στοιχεία της.

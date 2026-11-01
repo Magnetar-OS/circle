@@ -25,7 +25,7 @@ contacts-count = { $count } { $count ->
 ## The list
 
 search-contacts = Search contacts…
-no-contacts = No contacts yet.
+no-contacts = No contacts yet
 no-contacts-description = Add a CardDAV account to sync your address book, or create a contact.
 no-search-results = No contacts match “{ $query }”.
 no-selection = Select a contact to see their details.

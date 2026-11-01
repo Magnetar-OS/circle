@@ -11,6 +11,32 @@ use cosmic_pim_core::model::Contact;
 use crate::app::{ContactKey, Message};
 use crate::fl;
 
+/// An empty address book: what to do about it, with the two ways to do it.
+fn empty<'a>(spacing: cosmic::cosmic_theme::Spacing) -> Element<'a, Message> {
+    widget::column::with_capacity(3)
+        .spacing(spacing.space_s)
+        .align_x(Alignment::Center)
+        .push(widget::text::title3(fl!("no-contacts")))
+        .push(
+            widget::text::body(fl!("no-contacts-description"))
+                .align_x(Alignment::Center)
+                .width(Length::Fill),
+        )
+        .push(
+            widget::row::with_capacity(2)
+                .spacing(spacing.space_xs)
+                .push(widget::button::suggested(fl!("new-contact")).on_press(Message::NewContact))
+                .push(
+                    widget::button::standard(fl!("add-account"))
+                        .on_press(Message::OpenAccountsWindow),
+                ),
+        )
+        .max_width(420)
+        .apply(widget::container)
+        .center(Length::Fill)
+        .into()
+}
+
 /// The scrollable list of contacts.
 pub fn list<'a>(
     contacts: &'a [Contact],
@@ -25,13 +51,12 @@ pub fn list<'a>(
     let spacing = cosmic::theme::spacing();
 
     if contacts.is_empty() {
-        let message = if query.trim().is_empty() {
-            fl!("no-contacts")
-        } else {
-            fl!("no-search-results", query = query.trim().to_owned())
-        };
+        if query.trim().is_empty() {
+            return empty(spacing);
+        }
         return widget::container(
-            widget::text::body(message).class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
+            widget::text::body(fl!("no-search-results", query = query.trim().to_owned()))
+                .class(cosmic::theme::Text::Custom(crate::ui::dim_text)),
         )
         .padding(spacing.space_m)
         .into();

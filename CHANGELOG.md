@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- An empty address book shows a centred empty state with New contact and
+  Add account… buttons, instead of one grey line in the corner of the list.
+- The selection-mode toggle beside the search field is a "Select" button
+  rather than an unlabelled check mark, and is hidden while the list is
+  empty.
+- The search field's clear button appears only once there is text to clear.
+- "Select a contact to see their details." is centred in the detail pane,
+  and left out while there are no contacts to select.
+
 ## [1.6.1] - 2026-11-01
 
 ### Changed
