@@ -93,12 +93,11 @@ pub fn bar(
         ),
     );
 
-    // Envelope's menu geometry, for the same reasons: the default
-    // `Uniform(30)` height gives every divider a full row, and the default
-    // 150 width ellipsizes labels and leaves the shortcut column no room.
+    // Envelope's menu width, for the same reason: the default 150 ellipsizes
+    // labels and leaves the shortcut column no room. Item height is left to
+    // libcosmic, whose default has been dynamic since fcb3865.
     vec![
         menu::bar(vec![file, edit, view])
-            .item_height(menu::ItemHeight::Dynamic(36))
             .item_width(menu::ItemWidth::Uniform(260))
             .into(),
     ]
