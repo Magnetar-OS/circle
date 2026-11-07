@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "circle"
-version = "1.6.3"
+version = "1.6.4"
 dependencies = [
  "any_ascii",
  "base64 0.23.1",
