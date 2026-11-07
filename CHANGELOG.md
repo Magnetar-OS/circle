@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Built on zbus 6 and cosmic-pim 5, as libcosmic now is.
+
 ## [1.6.3] - 2026-11-01
 
 ### Changed

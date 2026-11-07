@@ -24,14 +24,14 @@ xdgen = "0.1"
 # Registry versions: cosmic-pim 4 is on crates.io. A commented [patch]
 # below swaps in the sibling checkout for local work. See slate/Cargo.toml for
 # the same note in full.
-cosmic-pim-core = "4.1"
-cosmic-pim-accounts = "4.1"
+cosmic-pim-core = "5.0"
+cosmic-pim-accounts = "5.0"
 # Default features off: the one default is `mail` (IMAP/SMTP through
 # cosmic-pim-mail, with OpenPGP and rsa), which a contacts app never runs.
-cosmic-pim-sync = { version = "4.1", default-features = false }
+cosmic-pim-sync = { version = "5.0", default-features = false }
 # Which kind of collection a sync report is about (`Flavor`), so a failed
 # calendar is left to Slate; also what the tests read the push queue through.
-cosmic-pim-caldav = "4.1"
+cosmic-pim-caldav = "5.0"
 
 # --- COSMIC / UI ---
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
@@ -69,7 +69,7 @@ sha2 = "0.11"
 # it a number to dial or text. Already in the tree through libcosmic, and used
 # directly here for the same reason Slate does — the alternative is shelling
 # out to a CLI that may not be installed alongside the daemon.
-zbus = "5.19"
+zbus = "6.2"
 # The launcher plugin starts Circle, and the mail handler, as units of the
 # user's systemd session rather than as children of pop-launcher, which reaps
 # its plugins. libcosmic's launcher crate, from the same repository and so the
