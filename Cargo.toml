@@ -7,7 +7,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 description = "Circle — contacts for the COSMIC desktop"
 repository = "https://github.com/Magnetar-OS/circle"
-rust-version = "1.99.1"
+rust-version = "1.100.0"
 # Not on crates.io: this application links libcosmic, a git dependency, and
 # the registry refuses any crate that carries one. Circle ships as a
 # distribution package, not as a crate.
@@ -24,19 +24,19 @@ xdgen = "0.1"
 # Registry versions: cosmic-pim 4 is on crates.io. A commented [patch]
 # below swaps in the sibling checkout for local work. See slate/Cargo.toml for
 # the same note in full.
-cosmic-pim-core = "5.0"
-cosmic-pim-accounts = "5.0"
+cosmic-pim-core = "6.0"
+cosmic-pim-accounts = "6.0"
 # Default features off: the one default is `mail` (IMAP/SMTP through
 # cosmic-pim-mail, with OpenPGP and rsa), which a contacts app never runs.
-cosmic-pim-sync = { version = "5.0", default-features = false }
+cosmic-pim-sync = { version = "6.0", default-features = false }
 # Which kind of collection a sync report is about (`Flavor`), so a failed
 # calendar is left to Slate; also what the tests read the push queue through.
-cosmic-pim-caldav = "5.0"
+cosmic-pim-caldav = "6.0"
 
 # --- COSMIC / UI ---
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10"
-rust-embed = "8.13"
+rust-embed = "8.14"
 open = "5.4"
 tokio = { version = "1.54", features = ["full"] }
 
@@ -61,7 +61,7 @@ strsim = "0.11"
 # Sharing a contact as a QR code. Default features off: the bundled image and
 # SVG renderers pull their own dependencies, and the matrix is all this needs
 # — the SVG is twenty lines and keeps the payload under our own control.
-qrcode = { version = "0.14", default-features = false }
+qrcode = { version = "0.15", default-features = false }
 # Content-addressing for attachments: the digest is a blob's identity, so two
 # copies of the same scan are stored once. Already in the graph.
 sha2 = "0.11"
@@ -69,7 +69,7 @@ sha2 = "0.11"
 # it a number to dial or text. Already in the tree through libcosmic, and used
 # directly here for the same reason Slate does — the alternative is shelling
 # out to a CLI that may not be installed alongside the daemon.
-zbus = "6.2"
+zbus = "6.5"
 # The launcher plugin starts Circle, and the mail handler, as units of the
 # user's systemd session rather than as children of pop-launcher, which reaps
 # its plugins. libcosmic's launcher crate, from the same repository and so the
@@ -82,7 +82,7 @@ csv = "1.4"
 
 # `search_field`: libcosmic's search field with a clear button only while
 # there is text. Consumed by tag; it unifies with this crate's own libcosmic.
-cosmic-ext-widgets = { git = "https://github.com/Magnetar-OS/cosmic-ext-widgets.git", tag = "v1.3.1" }
+cosmic-ext-widgets = { git = "https://github.com/Magnetar-OS/cosmic-ext-widgets.git", tag = "v1.3.2" }
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
